@@ -138,7 +138,8 @@ class ShowdownBot:
         checkpoint: Optional[str] = None,
         ladder: bool = False,
         ladder_matches: int = 5,
-        stealth: bool = True
+        stealth: bool = True,
+        evaluator: str = "hybrid"
     ):
         config_path = "showdown_config.json"
         if os.path.exists(config_path):
@@ -161,6 +162,8 @@ class ShowdownBot:
                         ladder_matches = cfg["ladder_matches"]
                     if "stealth" in cfg:
                         stealth = cfg["stealth"]
+                    if "evaluator" in cfg:
+                        evaluator = cfg["evaluator"]
             except Exception:
                 pass
 
@@ -173,6 +176,7 @@ class ShowdownBot:
         self.ladder_mode = ladder
         self.max_ladder_matches = ladder_matches
         self.stealth_mode = stealth
+        self.evaluator_mode = (evaluator or "hybrid").lower().strip()
         self.ladder_games_played = 0
         self.ladder_wins = 0
         self.ladder_losses = 0
@@ -192,12 +196,28 @@ class ShowdownBot:
         # Load Neural & Heuristic Evaluators into HybridEvaluator
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = GlaubermonMaxNet(d_model=256, nhead=8, num_actions=14).to(self.device)
-        if os.path.exists(checkpoint):
+        ckpt_loaded = False
+        if checkpoint and os.path.exists(checkpoint):
             self.model.load_state_dict(torch.load(checkpoint, map_location=self.device))
             logger.info(f"Loaded AlphaZero/ReBeL weights from {checkpoint}")
+            ckpt_loaded = True
+        else:
+            logger.warning(f"No checkpoint found at {checkpoint}; neural evaluation running without pre-trained weights")
+
         self.neural_eval = NeuralEvaluator(self.model, self.device)
         self.heuristic_eval = HeuristicEvaluator()
-        self.evaluator = self.heuristic_eval
+
+        if self.evaluator_mode == "neural" and ckpt_loaded:
+            self.evaluator = self.neural_eval
+            logger.info("Active Evaluator: NeuralEvaluator (100% AlphaZero/ReBeL neural value + policy prior)")
+        elif self.evaluator_mode == "heuristic" or not ckpt_loaded:
+            self.evaluator = self.heuristic_eval
+            logger.info("Active Evaluator: HeuristicEvaluator (Domain-expert competitive heuristic)")
+        else:
+            # Default: hybrid (combines AlphaZero/ReBeL neural foresight + heuristic ground truth + policy priors)
+            self.evaluator = HybridEvaluator(self.neural_eval, self.heuristic_eval, weight_neural=0.60)
+            logger.info("Active Evaluator: HybridEvaluator (60% AlphaZero/ReBeL neural + 40% Heuristic + Policy Prior)")
+
         self.resolver = SubgameResolver(evaluator=self.evaluator)
         self.deducer = LogDeducer()
 
@@ -1420,6 +1440,7 @@ if __name__ == "__main__":
     default_depth = 2
     default_team = "balance"
     default_ckpt = None
+    default_evaluator = "hybrid"
 
     config_path = "showdown_config.json"
     if os.path.exists(config_path):
@@ -1431,6 +1452,7 @@ if __name__ == "__main__":
                 default_depth = cfg.get("depth", default_depth)
                 default_team = cfg.get("team", default_team)
                 default_ckpt = cfg.get("checkpoint_path", default_ckpt)
+                default_evaluator = cfg.get("evaluator", default_evaluator)
         except Exception:
             pass
 
@@ -1441,6 +1463,7 @@ if __name__ == "__main__":
     parser.add_argument("--team", type=str, default=default_team, choices=["balance", "hyper_offense", "ho", "stall", "pelol", "pelol94", "random"], help="Team archetype: 'balance', 'hyper_offense'/'ho', 'stall', 'pelol', or 'random' (default: balance)")
     parser.add_argument("--challenge", type=str, default=None, help="Automatically send battle challenge to user")
     parser.add_argument("--checkpoint", type=str, default=default_ckpt, help="Path to checkpoint file")
+    parser.add_argument("--evaluator", type=str, default=default_evaluator, choices=["hybrid", "neural", "heuristic"], help="Evaluator mode: 'hybrid' (default: 60%% AlphaZero neural + 40%% heuristic + policy prior), 'neural' (pure neural), or 'heuristic' (rule-based baseline)")
     parser.add_argument("--ladder", action="store_true", help="Enable autonomous ranked ladder matchmaking (/search gen9ou)")
     parser.add_argument("--ladder-matches", type=int, default=5, help="Number of ladder matches to play in this session (default: 5)")
     parser.add_argument("--no-stealth", action="store_true", help="Disable anti-detection humanized delays")
@@ -1455,6 +1478,7 @@ if __name__ == "__main__":
         checkpoint=args.checkpoint,
         ladder=args.ladder,
         ladder_matches=args.ladder_matches,
-        stealth=not args.no_stealth
+        stealth=not args.no_stealth,
+        evaluator=args.evaluator
     )
     asyncio.run(bot.run())

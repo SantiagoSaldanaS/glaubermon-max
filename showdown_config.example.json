@@ -1,7 +1,8 @@
-﻿{
+{
   "username": "YourBotUsername",
   "password": "YourPasswordHere",
   "depth": 2,
   "team": "balance",
-  "checkpoint_path": "checkpoints/glaubermon_rebel_latest.pt"
+  "checkpoint_path": "checkpoints/glaubermon_rebel_latest.pt",
+  "evaluator": "hybrid"
 }

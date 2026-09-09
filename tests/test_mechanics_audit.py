@@ -699,5 +699,23 @@ def test_gholdengo_air_balloon_nasty_plot_vulnerability():
     assert getattr(action, "move_id", "") != "nastyplot", f"Gholdengo must not use Nasty Plot when Air Balloon pops to faster lethal threat"
 
 
+def test_showdown_bot_evaluator_wiring():
+    """Verify that ShowdownBot properly connects the requested evaluator to SubgameResolver."""
+    from glaubermon.client.showdown_bot import ShowdownBot
+    from glaubermon.search.evaluators import HybridEvaluator, HeuristicEvaluator, NeuralEvaluator
 
+    # Default evaluator mode: Hybrid (blends neural network + heuristic)
+    bot_hybrid = ShowdownBot(username="TestBot", evaluator="hybrid", checkpoint="checkpoints/glaubermon_rebel_latest.pt")
+    assert isinstance(bot_hybrid.evaluator, HybridEvaluator), "Default evaluator must be HybridEvaluator"
+    assert bot_hybrid.resolver.evaluator is bot_hybrid.evaluator
+    assert hasattr(bot_hybrid.evaluator, "get_policy_prior"), "HybridEvaluator must provide get_policy_prior"
 
+    # Pure heuristic mode
+    bot_heur = ShowdownBot(username="TestBot", evaluator="heuristic")
+    assert isinstance(bot_heur.evaluator, HeuristicEvaluator), "evaluator='heuristic' must set HeuristicEvaluator"
+    assert bot_heur.resolver.evaluator is bot_heur.evaluator
+
+    # Pure neural mode
+    bot_neural = ShowdownBot(username="TestBot", evaluator="neural", checkpoint="checkpoints/glaubermon_rebel_latest.pt")
+    assert isinstance(bot_neural.evaluator, NeuralEvaluator), "evaluator='neural' must set NeuralEvaluator"
+    assert bot_neural.resolver.evaluator is bot_neural.evaluator

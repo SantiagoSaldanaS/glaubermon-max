@@ -1,4 +1,4 @@
-﻿# Glaubermon Max (Pokechamp): Master Architecture & AI Handoff Specification
+# Glaubermon Max (Pokechamp): Master Architecture & AI Handoff Specification
 
 ## 1. Executive Summary & Project Identity
 **Glaubermon Max** (Showdown handle: `Glaubermax`) is a superhuman, game-theoretic artificial intelligence engine built specifically for competitive Pokémon Showdown ([Gen 9] OU Singles). 
@@ -162,6 +162,11 @@ During extensive testing and live matches against human players (including `Chin
 * **Symptom**: Passing `--depth 3` failed with `argparse error: choices=[1, 2]`.
 * **Resolution**: Expanded CLI choices to `[1, 2, 3, 4]` in `showdown_bot.py:L1440`.
 
+### 11. Neural Network Evaluator Disconnection & Hybrid Integration
+* **Symptom**: In `showdown_bot.py`, `GlaubermonMaxNet` weights were loaded into GPU memory (`self.model.load_state_dict(...)`), but `self.evaluator` was hardcoded to `self.heuristic_eval`, ignoring the trained neural net at leaf evaluation and omitting policy priors from the Nash matrix solver.
+* **Root Cause**: During the diagnosis of the 10 tactical pathologies above, `self.evaluator` was temporarily isolated to `HeuristicEvaluator` to verify rule-based payoff sanity and eliminate stochastic variance from early checkpoint approximations. It was left pinned after testing.
+* **Resolution**: Connected `HybridEvaluator` (60% AlphaZero/ReBeL neural value + 40% grounded heuristic + neural policy priors via `get_policy_prior()`), and added `--evaluator [hybrid|neural|heuristic]` CLI and config flags.
+
 ---
 
 ## 5. Verification & Test Suite Summary
@@ -171,14 +176,14 @@ Run the automated test suite at any time:
 python -m pytest tests/ -v
 ```
 
-**Status**: **105/105 tests passing in 4.77 seconds**.
-- `test_match_pathology_fixes.py`: 9/9 tests verifying all 10 pathologies above.
+**Status**: **106/106 tests passing in 5.33 seconds**.
+- `test_match_pathology_fixes.py`: 9/9 tests verifying pathologies.
 - `test_pelol94_fixes.py`: 9/9 tests verifying forced switch replacement and combat evaluation.
 - `test_pelol94_sparring.py`: 6/6 tests verifying immunity and Tera state isolation.
 - `test_pelol_rematch_fixes.py`: 4/4 tests verifying hazard management and setup rejection.
 - `test_speed_tie_and_ruination_trap.py`: 3/3 tests verifying speed-tie risk asymmetry.
 - `test_matrix_solver.py`: 5/5 tests verifying Linear Programming and Trembling-Hand solvers.
-- `test_mechanics_audit.py`: 27/27 tests auditing cartridge abilities, items, and formulas.
+- `test_mechanics_audit.py`: 28/28 tests auditing cartridge abilities, items, formulas, and evaluator wiring.
 
 ---
 
@@ -186,11 +191,13 @@ python -m pytest tests/ -v
 
 If you are continuing development on this system, prioritize the following high-impact areas:
 
-1. **Particle-Filter Belief State Live Synchronization**:
+1. **High-Fidelity Self-Play Retraining**:
+   - The initial neural checkpoint (`checkpoints/glaubermon_rebel_latest.pt`) was trained using an earlier simplified simulation kernel (`glaubermon/sim/`).
+   - Now that `glaubermon/inference/damage_calc.py` and `glaubermon/data/showdown_dex.py` faithfully reproduce 16-roll Gen 9 cartridge mechanics (Protosynthesis, Embody Aspect, Supreme Overlord, exact hazards), re-running the offline self-play training loop directly on this high-fidelity kernel will close the distribution gap and enable 100% pure neural evaluation.
+2. **Particle-Filter Belief State Live Synchronization**:
    - In `glaubermon/inference/log_deducer.py`, hook the Showdown WebSocket log stream (`-damage`, `-heal`, `-boost`) to dynamically update posterior probabilities over opponent EV spreads and items in real time.
-2. **Monte Carlo Speed-Tie Sampling**:
+3. **Monte Carlo Speed-Tie Sampling**:
    - For 50/50 speed ties between lethal sweepers (e.g. Dragapult vs Dragapult), currently evaluated via $0.5 \times v_1 + 0.5 \times v_2$. Enhance with probabilistic roll distribution when damage variance can alter survive thresholds.
-3. **ReBeL Self-Play Value Head Retraining**:
-   - The neural network checkpoint in `checkpoints/glaubermon_rebel_latest.pt` can be continuously trained using self-play trajectory dumps (`glaubermon/sim/`) to improve positional evaluation without relying on heuristic overrides.
-4. **Rust / C++ Search Engine Acceleration**:
-   - The tree expansion in `subgame_resolver.py` is written in pure Python/NumPy. Porting the transition and minimax kernel to Rust (via PyO3) will allow **Depth-4 search in under 500ms**, unlocking grandmaster-level horizon vision.
+4. **Rust / C++ Search Engine Acceleration (Proposed Future Optimization)**:
+   - Note: The current codebase is **100% pure Python/PyTorch**. Porting the transition simulation and minimax matrix evaluation kernel to Rust (via PyO3) or C++ is a future scaling optimization to enable **Depth-4 lookahead in under 500ms** and 100k+ self-play games/sec.
+
