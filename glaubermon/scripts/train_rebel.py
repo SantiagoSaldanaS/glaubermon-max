@@ -19,6 +19,7 @@ import signal
 import random
 import argparse
 from collections import deque
+from dataclasses import replace
 from typing import List, Tuple, Dict, Optional
 
 import torch
@@ -113,17 +114,19 @@ class AlphaZeroTrainer:
 
     def __init__(
         self,
-        checkpoint_dir: str = "checkpoints",
+        checkpoint_dir: str = "runs/rebel-corrections",
         d_model: int = 256,
         nhead: int = 8,
         lr: float = 3e-4,
         device: Optional[torch.device] = None,
-        reset_from_scratch: bool = False
+        reset_from_scratch: bool = False,
+        mechanics_seed: int = 0,
     ):
         self.checkpoint_dir = checkpoint_dir
         os.makedirs(self.checkpoint_dir, exist_ok=True)
         self.latest_ckpt = os.path.join(self.checkpoint_dir, "glaubermon_rebel_latest.pt")
         self.meta_path = os.path.join(self.checkpoint_dir, "rebel_meta.json")
+        self.mechanics_seed = mechanics_seed
 
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"AlphaZero / ReBeL Engine Initialized on: {self.device} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'})")
@@ -137,7 +140,7 @@ class AlphaZeroTrainer:
         self.policy_loss_fn = nn.CrossEntropyLoss()
 
         self.replay_buffer = AlphaZeroReplayBuffer(capacity=25000)
-        self.evaluator = HeuristicEvaluator()
+        self.evaluator = HybridEvaluator(NeuralEvaluator(self.model, self.device), HeuristicEvaluator(), weight_neural=0.60)
         self.resolver = SubgameResolver(evaluator=self.evaluator)
 
         # Meta tracking
@@ -156,42 +159,30 @@ class AlphaZeroTrainer:
         signal.signal(signal.SIGINT, self._handle_interrupt)
 
     def _load_checkpoint_if_exists(self):
-        """Resume automatically from latest checkpoint if available."""
-        if os.path.exists(self.latest_ckpt):
-            print(f"Loading checkpoint from {self.latest_ckpt}...")
-            try:
-                state_dict = torch.load(self.latest_ckpt, map_location=self.device)
-                self.model.load_state_dict(state_dict)
-                print("Model weights successfully loaded.")
-            except Exception as e:
-                print(f"Could not load weights from {self.latest_ckpt}: {e}")
-        elif os.path.exists("checkpoints/glaubermon_max_elite.pt"):
-            print("Warm-starting from grandmaster pretrained weights (checkpoints/glaubermon_max_elite.pt)...")
-            try:
-                state_dict = torch.load("checkpoints/glaubermon_max_elite.pt", map_location=self.device)
-                self.model.load_state_dict(state_dict)
-                print("Warm-start successful.")
-            except Exception as e:
-                print(f"Could not load grandmaster weights: {e}")
-        elif os.path.exists("checkpoints/glaubermon_max_latest.pt"):
-            print("Warm-starting from grandmaster pretrained weights (checkpoints/glaubermon_max_latest.pt)...")
-            try:
-                state_dict = torch.load("checkpoints/glaubermon_max_latest.pt", map_location=self.device)
-                self.model.load_state_dict(state_dict)
-                print("Warm-start successful.")
-            except Exception as e:
-                print(f"Could not load grandmaster weights: {e}")
-
+        """Load weights explicitly; incompatible files must not silently train a random net."""
+        candidates = [self.latest_ckpt, "checkpoints/glaubermon_rebel_latest.pt",
+                      "checkpoints/glaubermon_max_elite.pt", "checkpoints/glaubermon_max_latest.pt"]
+        source = next((path for path in candidates if os.path.exists(path)), None)
+        if os.path.exists(self.meta_path) and not os.path.exists(self.latest_ckpt):
+            raise FileNotFoundError(f"Metadata exists without its checkpoint: {self.latest_ckpt}")
+        if source is None:
+            print("No checkpoint found: using the newly initialized model.")
+            return
+        self.model.load_state_dict(torch.load(source, map_location=self.device, weights_only=True))
+        print(f"Loaded model weights from {source}")
+        if source != self.latest_ckpt:
+            print("New experiment: original training counters are not copied.")
+            return
         if os.path.exists(self.meta_path):
-            try:
-                with open(self.meta_path, "r") as f:
-                    meta = json.load(f)
-                    self.total_games = meta.get("total_games", 0)
-                    self.total_turns = meta.get("total_turns", 0)
-                    self.elapsed_offset = meta.get("elapsed_time_seconds", 0.0)
-                    print(f"Resuming training: {self.total_games} games previously played.")
-            except Exception:
-                pass
+            with open(self.meta_path, "r") as f:
+                meta = json.load(f)
+            if meta.get("rollout_mode") != "sampled_internal_v1_experimental":
+                raise ValueError("Checkpoint counters use another rollout mode; choose a new --checkpoint-dir.")
+            self.total_games = meta.get("total_games", 0)
+            self.total_turns = meta.get("total_turns", 0)
+            self.elapsed_offset = meta.get("elapsed_time_seconds", 0.0)
+            self.mechanics_seed = meta.get("mechanics_seed", self.mechanics_seed)
+            print(f"Restored weights/counters ({self.total_games} games); optimizer and replay buffer restart.")
 
     def save_checkpoint(self):
         """Save network weights and metadata tracker."""
@@ -200,6 +191,9 @@ class AlphaZeroTrainer:
             milestone_path = os.path.join(self.checkpoint_dir, f"glaubermon_rebel_{self.total_games}g.pt")
             torch.save(self.model.state_dict(), milestone_path)
         meta = {
+            "rollout_mode": "sampled_internal_v1_experimental",
+            "evaluator": "hybrid_0.60",
+            "mechanics_seed": self.mechanics_seed,
             "total_games": self.total_games,
             "total_turns": self.total_turns,
             "elapsed_time_seconds": self.elapsed_offset + (time.time() - self.start_time),
@@ -215,10 +209,24 @@ class AlphaZeroTrainer:
         print("Model saved safely. Exiting cleanly.")
         sys.exit(0)
 
+    def _replace_fainted(self, state: BattleState, resolver: SubgameResolver, opponent_resolver=None):
+        """Replacement is a separate phase, including repeated hazard KOs."""
+        for side_idx in (1, 2):
+            view = state if side_idx == 1 else replace(state, p1=state.p2, p2=state.p1)
+            while view.p1.active_pokemon.is_fainted and not view.p1.is_all_fainted:
+                active_resolver = opponent_resolver if side_idx == 2 and opponent_resolver is not None else resolver
+                slot = execute_showdown_accurate_force_switch(active_resolver, view.p1, view.p2.active_pokemon, view)
+                if slot not in view.p1.available_switches():
+                    raise ValueError(f"Invalid forced replacement slot: {slot}")
+                view.p1.active_index = slot
+                apply_entry_hazards(state, side_idx, slot)
+
     def play_self_play_game(self) -> List[Tuple]:
         """Play one full self-play match using SubgameResolver search."""
         state = generate_competitive_battle()
         trajectory = []
+        self.model.eval()  # train_step enables dropout; search must disable it again.
+        rng = random.Random(self.mechanics_seed + self.total_games)
 
         for turn in range(35):
             if state.is_game_over:
@@ -230,7 +238,7 @@ class AlphaZeroTrainer:
             act1, p1_strat, actions1, _ = self.resolver.resolve_turn(state, depth=1, sample=True)
 
             # Solve for P2 (perspective inverted)
-            inv_state = BattleState(p1=state.p2, p2=state.p1, weather=state.weather, terrain=state.terrain, turn=state.turn)
+            inv_state = replace(state, p1=state.p2, p2=state.p1)
             act2, _, _, _ = self.resolver.resolve_turn(inv_state, depth=1, sample=True)
 
             # Encode search policy distribution into exact 14-dim action logit targets
@@ -242,19 +250,10 @@ class AlphaZeroTrainer:
             trajectory.append((state_tensors, target_policy))
 
             # Execute turn
-            state = simulate_turn_transition(state, act1, act2)
+            state = simulate_turn_transition(state, act1, act2, sample_outcomes=True, rng=rng)
 
             # Force replacement if fainted
-            if state.p1.active_pokemon and state.p1.active_pokemon.is_fainted and not state.p1.is_all_fainted:
-                best_sw1 = execute_showdown_accurate_force_switch(self.resolver, state.p1, state.p2.active_pokemon, state)
-                state.p1.active_index = best_sw1
-                apply_entry_hazards(state, 1, best_sw1)
-
-            if state.p2.active_pokemon and state.p2.active_pokemon.is_fainted and not state.p2.is_all_fainted:
-                inv_state = BattleState(p1=state.p2, p2=state.p1, weather=state.weather, terrain=state.terrain, turn=state.turn)
-                best_sw2 = execute_showdown_accurate_force_switch(self.resolver, inv_state.p1, inv_state.p2.active_pokemon, inv_state)
-                state.p2.active_index = best_sw2
-                apply_entry_hazards(state, 2, best_sw2)
+            self._replace_fainted(state, self.resolver)
 
         if state.winner == 1:
             outcome = 1.0
@@ -315,21 +314,21 @@ class AlphaZeroTrainer:
     def evaluate_vs_baseline(self, num_games: int = 5) -> float:
         """Benchmark current neural model against heuristic baseline player."""
         self.model.eval()
-        neural_eval = NeuralEvaluator(self.model, self.device)
-        neural_resolver = SubgameResolver(evaluator=neural_eval)
+        neural_resolver = SubgameResolver(evaluator=self.evaluator)
         heuristic = HeuristicEvaluator()
         heuristic_resolver = SubgameResolver(evaluator=heuristic)
         wins = 0
 
-        for _ in range(num_games):
+        for game_idx in range(num_games):
             state = generate_competitive_battle()
+            rng = random.Random(self.mechanics_seed + 1_000_000 + game_idx)
             for turn in range(30):
                 if state.is_game_over:
                     break
                 act1, _, _, _ = neural_resolver.resolve_turn(state, depth=1, sample=False)
 
                 # Baseline heuristic action
-                inv_state = BattleState(p1=state.p2, p2=state.p1, weather=state.weather, terrain=state.terrain, turn=state.turn)
+                inv_state = replace(state, p1=state.p2, p2=state.p1)
                 p2_acts = inv_state.get_valid_actions(player=1)
                 best_act = p2_acts[0]
                 best_val = -999.0
@@ -340,17 +339,8 @@ class AlphaZeroTrainer:
                         best_val = v
                         best_act = a
 
-                state = simulate_turn_transition(state, act1, best_act)
-                if state.p1.active_pokemon and state.p1.active_pokemon.is_fainted and not state.p1.is_all_fainted:
-                    best_sw1 = execute_showdown_accurate_force_switch(neural_resolver, state.p1, state.p2.active_pokemon, state)
-                    state.p1.active_index = best_sw1
-                    apply_entry_hazards(state, 1, best_sw1)
-
-                if state.p2.active_pokemon and state.p2.active_pokemon.is_fainted and not state.p2.is_all_fainted:
-                    inv_s = BattleState(p1=state.p2, p2=state.p1, weather=state.weather, terrain=state.terrain, turn=state.turn)
-                    best_sw2 = execute_showdown_accurate_force_switch(heuristic_resolver, inv_s.p1, inv_s.p2.active_pokemon, inv_s)
-                    state.p2.active_index = best_sw2
-                    apply_entry_hazards(state, 2, best_sw2)
+                state = simulate_turn_transition(state, act1, best_act, sample_outcomes=True, rng=rng)
+                self._replace_fainted(state, neural_resolver, heuristic_resolver)
 
             if state.winner == 1:
                 wins += 1
@@ -402,7 +392,10 @@ if __name__ == "__main__":
     parser.add_argument("--save-every", type=int, default=10, help="Save model every N games")
     parser.add_argument("--eval-every", type=int, default=25, help="Run arena evaluation every N games")
     parser.add_argument("--from-scratch", action="store_true", help="Train from scratch without loading prior weights")
+    parser.add_argument("--checkpoint-dir", default="runs/rebel-corrections", help="Separate output directory; original checkpoints stay intact")
+    parser.add_argument("--mechanics-seed", type=int, default=0, help="Seed for sampled mechanics; does not seed team generation or policy sampling")
     args = parser.parse_args()
 
-    trainer = AlphaZeroTrainer(reset_from_scratch=args.from_scratch)
+    trainer = AlphaZeroTrainer(checkpoint_dir=args.checkpoint_dir, reset_from_scratch=args.from_scratch,
+                              mechanics_seed=args.mechanics_seed)
     trainer.train(games_to_play=args.games, save_every=args.save_every, eval_every=args.eval_every)

@@ -28,6 +28,19 @@ class Move:
     recoil: Optional[Tuple[int, int]] = None
     boosts: Optional[Dict[str, int]] = None
     self_boosts: Optional[Dict[str, int]] = None
+    target: str = "normal"
+    always_hits: bool = False
+    crit_ratio: int = 1
+    will_crit: bool = False
+    blocked_by_protect: bool = True
+
+    def clone(self) -> "Move":
+        """Copy mutable battle data without reloading or reinterpreting the Dex."""
+        result = object.__new__(type(self))
+        result.__dict__ = self.__dict__.copy()
+        result.boosts = dict(self.boosts) if self.boosts is not None else None
+        result.self_boosts = dict(self.self_boosts) if self.self_boosts is not None else None
+        return result
 
     @classmethod
     def create(
@@ -50,9 +63,15 @@ class Move:
         recoil: Optional[Tuple[int, int]] = None,
         boosts: Optional[Dict[str, int]] = None,
         self_boosts: Optional[Dict[str, int]] = None,
+        target: Optional[str] = None,
+        always_hits: Optional[bool] = None,
+        crit_ratio: Optional[int] = None,
+        will_crit: Optional[bool] = None,
+        blocked_by_protect: Optional[bool] = None,
     ) -> "Move":
         move_id = clean_key(name)
-        if pp is None or is_contact is None or is_protect is None:
+        if any(value is None for value in (pp, is_contact, is_protect, target, always_hits,
+                                          crit_ratio, will_crit, blocked_by_protect)):
             try:
                 from glaubermon.data.showdown_dex import ShowdownDex
                 dex_m = ShowdownDex.get_instance().get_move(move_id)
@@ -80,6 +99,16 @@ class Move:
                     boosts = dex_m.boosts
                 if self_boosts is None:
                     self_boosts = dex_m.self_boosts
+                if target is None:
+                    target = dex_m.target
+                if always_hits is None:
+                    always_hits = dex_m.always_hits
+                if crit_ratio is None:
+                    crit_ratio = dex_m.crit_ratio
+                if will_crit is None:
+                    will_crit = dex_m.will_crit
+                if blocked_by_protect is None:
+                    blocked_by_protect = dex_m.blocked_by_protect
             except Exception:
                 pass
 
@@ -102,7 +131,12 @@ class Move:
             drain=drain,
             recoil=recoil,
             boosts=boosts,
-            self_boosts=self_boosts
+            self_boosts=self_boosts,
+            target="normal" if target is None else target,
+            always_hits=False if always_hits is None else always_hits,
+            crit_ratio=1 if crit_ratio is None else crit_ratio,
+            will_crit=False if will_crit is None else will_crit,
+            blocked_by_protect=True if blocked_by_protect is None else blocked_by_protect,
         )
 
     @classmethod
@@ -315,23 +349,10 @@ class Pokemon:
         return self.current_hp <= dmg
 
     def clone(self) -> "Pokemon":
-        """Fast shallow/deep copy for simulation branching."""
-        return Pokemon(
-            species=self.species,
-            level=self.level,
-            types=self.types,
-            max_hp=self.max_hp,
-            current_hp=self.current_hp,
-            status=self.status,
-            status_turns=self.status_turns,
-            item=self.item,
-            ability=self.ability,
-            tera_type=self.tera_type,
-            is_terastallized=self.is_terastallized,
-            protect_streak=self.protect_streak,
-            booster_stat=self.booster_stat,
-            choice_locked_move=self.choice_locked_move,
-            moves=list(self.moves),
-            boosts=dict(self.boosts),
-            raw_stats=dict(self.raw_stats)
-        )
+        """Isolate branches, preserving runtime flags without running __post_init__."""
+        result = object.__new__(type(self))
+        result.__dict__ = self.__dict__.copy()
+        result.moves = [move.clone() for move in self.moves]
+        result.boosts = dict(self.boosts)
+        result.raw_stats = dict(self.raw_stats)
+        return result

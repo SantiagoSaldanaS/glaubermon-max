@@ -110,6 +110,10 @@ class BattleState:
                         tera_type=active.tera_type
                     ))
 
+        # Exhausted/Choice-locked moves still allow Struggle, even with a bench.
+        if not actions:
+            actions.append(MoveAction(move_id="struggle", move_slot=1))
+
         # 2. Switch actions
         for slot in side.available_switches():
             actions.append(SwitchAction(

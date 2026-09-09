@@ -197,7 +197,7 @@ class ShowdownDex:
 
         prio = entry.get("priority", 0)
         base_pp = entry.get("pp", 10)
-        max_pp = int(base_pp * 1.6)
+        max_pp = base_pp if entry.get("noPPBoosts") else int(base_pp * 1.6)
 
         flags = entry.get("flags", {})
         is_contact = bool(flags.get("contact", 0) == 1)
@@ -261,7 +261,12 @@ class ShowdownDex:
             drain=drain,
             recoil=recoil,
             boosts=target_b if target_b else None,
-            self_boosts=self_b if self_b else None
+            self_boosts=self_b if self_b else None,
+            target=target,
+            always_hits=raw_acc is True,
+            crit_ratio=entry.get("critRatio", 1),
+            will_crit=bool(entry.get("willCrit", False)),
+            blocked_by_protect=bool(flags.get("protect", 0)),
         )
 
     def get_move_info(self, move_name: str) -> Tuple[PokemonType, MoveCategory, int, int, int]:

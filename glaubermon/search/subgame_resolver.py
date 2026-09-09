@@ -4,7 +4,7 @@ import random
 from typing import List, Optional, Tuple
 import numpy as np
 from glaubermon.core.battle_state import BattleState
-from glaubermon.core.pokemon import Pokemon
+from glaubermon.core.pokemon import Pokemon, Move
 from glaubermon.core.actions import Action, MoveAction, SwitchAction
 from glaubermon.core.types import ActionType, Hazard, PokemonType, MoveCategory, StatusCondition, Terrain
 from glaubermon.core.constants import get_type_effectiveness, clean_key
@@ -45,16 +45,28 @@ def simulate_turn_transition(
     state: BattleState,
     a1: Action,
     a2: Action,
-    tie_winner: Optional[str] = None
+    tie_winner: Optional[str] = None,
+    *,
+    sample_outcomes: bool = False,
+    rng: Optional[random.Random] = None,
 ) -> BattleState:
-    """Simulate a single simultaneous turn transition with priority, switching, and damage."""
+    """Advance the internal simulator, not a complete Showdown implementation.
+
+    Search retains deterministic damage/Protect approximations by default.
+    sample_outcomes draws speed ties, accuracy, critical hits, damage and Protect
+    for rollout experiments. Pass a dedicated seeded Random for reproducibility.
+    Sampled transitions leave fainted actives in place for the caller to replace.
+    """
+    rng = rng if rng is not None else random
     s = state.clone()
     p1_active = s.p1.active_pokemon
     p2_active = s.p2.active_pokemon
     if p1_active:
         p1_active.is_protected = False
+        p1_active.protect_success_rate = 0.0
     if p2_active:
         p2_active.is_protected = False
+        p2_active.protect_success_rate = 0.0
 
     # Phase 1: Handle Switches (Switches have highest priority)
     p1_switched = False
@@ -98,17 +110,20 @@ def simulate_turn_transition(
             apply_tera_boosts(p2_active)
 
     # Phase 3: Handle Moves
-    m1 = None
-    m2 = None
-    if a1 is not None and a1.action_type == ActionType.MOVE and p1_active and not p1_active.is_fainted:
-        slot = getattr(a1, "move_slot") - 1
-        if 0 <= slot < len(p1_active.moves):
-            m1 = p1_active.moves[slot]
+    def selected_move(action, mon):
+        if action is None or action.action_type != ActionType.MOVE or not mon or mon.is_fainted:
+            return None
+        if action.move_id == "struggle":
+            return Move(id="struggle", name="Struggle", move_type=PokemonType.UNKNOWN,
+                        category=MoveCategory.PHYSICAL, base_power=50,
+                        always_hits=True, is_contact=True)
+        slot = action.move_slot - 1
+        if 0 <= slot < len(mon.moves) and mon.moves[slot].pp > 0:
+            return mon.moves[slot]
+        return None
 
-    if a2 is not None and a2.action_type == ActionType.MOVE and p2_active and not p2_active.is_fainted:
-        slot = getattr(a2, "move_slot") - 1
-        if 0 <= slot < len(p2_active.moves):
-            m2 = p2_active.moves[slot]
+    m1 = selected_move(a1, p1_active)
+    m2 = selected_move(a2, p2_active)
 
     # Determine move order (Priority first, then Effective Speed)
     if m1 and m2:
@@ -127,7 +142,10 @@ def simulate_turn_transition(
             order = [("p2", m2), ("p1", m1)]
         else:
             # Gen 9 Speed tie: coin flip
-            if tie_winner == "p2":
+            winner = tie_winner
+            if winner is None and sample_outcomes:
+                winner = rng.choice(("p1", "p2"))
+            if winner == "p2":
                 order = [("p2", m2), ("p1", m1)]
             else:
                 order = [("p1", m1), ("p2", m2)]
@@ -146,6 +164,10 @@ def simulate_turn_transition(
 
         if attacker and not attacker.is_fainted and defender and not defender.is_fainted:
             m_id = move.id.lower().replace(" ", "").replace("-", "")
+            selected = move
+            is_protection = move.is_protect or m_id in ("protect", "spikyshield", "detect", "banefulbunker", "silktrap")
+            if not is_protection:
+                attacker.protect_streak = 0
 
             # Lock Choice items to move executed
             atk_it = clean_key(attacker.item)
@@ -157,7 +179,7 @@ def simulate_turn_transition(
                 if m_id == "sleeptalk":
                     other_moves = [m for m in attacker.moves if m.id.lower().replace(" ", "").replace("-", "") != "sleeptalk"]
                     if other_moves:
-                        move = random.choice(other_moves)
+                        move = rng.choice(other_moves)
                         m_id = move.id.lower().replace(" ", "").replace("-", "")
                 else:
                     attacker.status_turns -= 1
@@ -165,6 +187,13 @@ def simulate_turn_transition(
                         attacker.status = StatusCondition.NONE
                     moved_players.add(player)
                     continue  # Fast asleep, cannot move!
+
+            # Misses and failed moves consume PP; being KO'd before acting does not.
+            # Deduct the selected move, not a move called by Sleep Talk.
+            if selected.id != "struggle":
+                cost = 1 + int(clean_key(defender.ability) == "pressure" and selected.target in (
+                    "normal", "allAdjacentFoes", "allAdjacent", "any", "randomNormal", "foeSide"))
+                selected.pp = max(0, selected.pp - cost)
 
             # 0. Sucker Punch failure check:
             # Fails if opponent switched, or opponent used a status move, or opponent already moved!
@@ -179,9 +208,13 @@ def simulate_turn_transition(
             if getattr(move, "is_protect", False) or m_id in ("protect", "spikyshield", "detect", "banefulbunker", "silktrap"):
                 protect_count = getattr(attacker, "protect_streak", 0)
                 # Authentic Gen 9 Protect success decay formula: 1 / 3^k
-                success_rate = 1.0 / (3.0 ** protect_count)
+                success_rate = 1.0 / (3.0 ** min(protect_count, 6))
+                if sample_outcomes:
+                    success_rate = float(rng.random() < success_rate)
+                    if not any(who != player and who not in moved_players for who, _ in order):
+                        success_rate = 0.0  # Protect fails when no action remains to block.
                 attacker.protect_success_rate = success_rate
-                attacker.protect_streak = protect_count + 1
+                attacker.protect_streak = protect_count + 1 if success_rate else 0
                 attacker.last_protect_move = m_id
                 moved_players.add(player)
                 continue
@@ -189,16 +222,41 @@ def simulate_turn_transition(
                 attacker.protect_streak = 0
                 attacker.protect_success_rate = 0.0
 
+            succ_rate = getattr(defender, "protect_success_rate", 0.0)
+            targets_foe = move.target in ("normal", "allAdjacentFoes", "allAdjacent", "any", "randomNormal")
+            if sample_outcomes and succ_rate == 1.0 and targets_foe and move.blocked_by_protect:
+                if getattr(defender, "last_protect_move", "") == "spikyshield" and move.is_contact:
+                    attacker.take_damage(max(1, attacker.max_hp // 8))
+                moved_players.add(player)
+                continue
+
+            if sample_outcomes and targets_foe and not move.always_hits:
+                stage = max(-6, min(6, attacker.boosts.get("accuracy", 0) - defender.boosts.get("evasion", 0)))
+                modifier = (3 + stage) / 3 if stage >= 0 else 3 / (3 - stage)
+                chance = min(1.0, max(0.0, int(move.accuracy * 100 * modifier) / 100))
+                if clean_key(attacker.ability) != "noguard" and clean_key(defender.ability) != "noguard" and rng.random() >= chance:
+                    moved_players.add(player)
+                    continue
+
             actual_dmg = 0
             # 2. Damage calculation
             if move.category in (MoveCategory.PHYSICAL, MoveCategory.SPECIAL):
                 atk_side = s.p1 if player == "p1" else s.p2
+                critical = False
+                if sample_outcomes and move.base_power > 0:
+                    ratio = move.crit_ratio + int(clean_key(attacker.ability) == "superluck")
+                    ratio += int(clean_key(attacker.item) in ("scopelens", "razorclaw"))
+                    denominator = (24, 8, 2, 1)[max(0, min(3, ratio - 1))]
+                    critical = move.will_crit or rng.randrange(denominator) == 0
+                    if clean_key(defender.ability) in ("battlearmor", "shellarmor"):
+                        critical = False
                 rolls = calculate_damage_rolls(
                     attacker, defender, move, s.weather, s.terrain,
-                    attacker_side=atk_side
+                    attacker_side=atk_side, is_critical=critical,
                 )
-                median_dmg = rolls[len(rolls) // 2]
-                succ_rate = getattr(defender, "protect_success_rate", 0.0)
+                median_dmg = rng.choice(rolls) if sample_outcomes else rolls[len(rolls) // 2]
+                # Sampled blocks returned above; moves that bypass Protect reach here.
+                succ_rate = 0.0 if sample_outcomes else getattr(defender, "protect_success_rate", 0.0)
                 is_contact = getattr(move, "is_contact", False) or is_contact_move(m_id, move.category)
 
                 if succ_rate > 0.0:
@@ -215,6 +273,9 @@ def simulate_turn_transition(
                     def_it = clean_key(defender.item)
                     if def_it == "rockyhelmet" and is_contact:
                         attacker.take_damage(max(1, attacker.max_hp // 6))
+
+                if m_id == "struggle":
+                    attacker.take_damage(max(1, (attacker.max_hp + 2) // 4))
 
                 # Pop Air Balloon on direct damage
                 if actual_dmg > 0 and clean_key(defender.item) == "airballoon":
@@ -419,12 +480,12 @@ def simulate_turn_transition(
 
     # Auto-switch fainted active Pokémon so subsequent turn evaluations are clean
     # Note: Do not inflict entry hazards here; hazards only trigger when a Pokémon actually switches in or is chosen via forced switch
-    if s.p1.active_pokemon and s.p1.active_pokemon.is_fainted and not s.p1.is_all_fainted:
+    if not sample_outcomes and s.p1.active_pokemon and s.p1.active_pokemon.is_fainted and not s.p1.is_all_fainted:
         sw1 = s.p1.available_switches()
         if sw1:
             s.p1.active_index = sw1[0]
 
-    if s.p2.active_pokemon and s.p2.active_pokemon.is_fainted and not s.p2.is_all_fainted:
+    if not sample_outcomes and s.p2.active_pokemon and s.p2.active_pokemon.is_fainted and not s.p2.is_all_fainted:
         sw2 = s.p2.available_switches()
         if sw2:
             s.p2.active_index = sw2[0]

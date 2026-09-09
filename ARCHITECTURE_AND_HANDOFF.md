@@ -1,5 +1,7 @@
 # Glaubermon Max (Pokechamp): Master Architecture & AI Handoff Specification
 
+Local development update: see [training corrections and validation limits](docs/TRAINING_CORRECTIONS.md). The internal simulator remains partial; the historical accuracy claims below are not a full equivalence certification against Showdown.
+
 ## 1. Executive Summary & Project Identity
 **Glaubermon Max** (Showdown handle: `Glaubermax`) is a superhuman, game-theoretic artificial intelligence engine built specifically for competitive Pokémon Showdown ([Gen 9] OU Singles). 
 
@@ -200,4 +202,3 @@ If you are continuing development on this system, prioritize the following high-
    - For 50/50 speed ties between lethal sweepers (e.g. Dragapult vs Dragapult), currently evaluated via $0.5 \times v_1 + 0.5 \times v_2$. Enhance with probabilistic roll distribution when damage variance can alter survive thresholds.
 4. **Rust / C++ Search Engine Acceleration (Proposed Future Optimization)**:
    - Note: The current codebase is **100% pure Python/PyTorch**. Porting the transition simulation and minimax matrix evaluation kernel to Rust (via PyO3) or C++ is a future scaling optimization to enable **Depth-4 lookahead in under 500ms** and 100k+ self-play games/sec.
-

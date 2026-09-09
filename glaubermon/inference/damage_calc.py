@@ -3,7 +3,7 @@
 import math
 from typing import List, Optional, Tuple, Any
 from glaubermon.core.types import PokemonType, MoveCategory, Weather, Terrain, StatusCondition
-from glaubermon.core.constants import get_type_effectiveness, DAMAGE_ROLLS, clean_key
+from glaubermon.core.constants import get_type_effectiveness, clean_key
 from glaubermon.core.pokemon import Pokemon, Move
 
 
@@ -164,12 +164,17 @@ def calculate_damage_rolls(
         return [0] * 16
 
     # Wonder Guard: Immune to non-super-effective damage
-    if def_ability == "wonderguard" and type_mult <= 1.0:
+    if def_ability == "wonderguard" and type_mult <= 1.0 and m_id != "struggle":
         return [0] * 16
 
     # 6. Determine Attack and Defense stats (Unaware ignores opponent's stat stages)
     ignore_atk_boosts = (def_ability == "unaware")
     ignore_def_boosts = (atk_ability == "unaware")
+    if is_critical:
+        attack_stat = "atk" if move.category == MoveCategory.PHYSICAL else "spa"
+        defense_stat = "def" if move.category == MoveCategory.PHYSICAL else "spd"
+        ignore_atk_boosts |= attacker.boosts.get(attack_stat, 0) < 0
+        ignore_def_boosts |= defender.boosts.get(defense_stat, 0) > 0
 
     if move.category == MoveCategory.PHYSICAL:
         atk = attacker.effective_stat("atk", ignore_boosts=ignore_atk_boosts)
@@ -341,17 +346,17 @@ def calculate_damage_rolls(
     mod_damage = int(mod_damage * weather_mult)
     if is_critical:
         mod_damage = int(mod_damage * crit_mult)
-    mod_damage = int(mod_damage * stab_mult)
-    mod_damage = int(mod_damage * type_mult)
-    mod_damage = int(mod_damage * burn_mult)
-    mod_damage = int(mod_damage * ability_mult)
-    mod_damage = int(mod_damage * item_mult)
-
-    # 13. Apply 16 discrete damage rolls (85% to 100%)
+    # 13. Gen 9 applies the integer random factor BEFORE STAB/type/burn.
+    # Moving it past these steps changes the discrete damage support.
     rolls = []
-    for roll in DAMAGE_ROLLS:
-        final_dmg = max(1, int(mod_damage * roll))
-        rolls.append(final_dmg)
+    for percent in range(85, 101):
+        final_dmg = mod_damage * percent // 100
+        final_dmg = int(final_dmg * stab_mult)
+        final_dmg = int(final_dmg * type_mult)
+        final_dmg = int(final_dmg * burn_mult)
+        final_dmg = int(final_dmg * ability_mult)
+        final_dmg = int(final_dmg * item_mult)
+        rolls.append(max(1, final_dmg))
 
     return rolls
 
