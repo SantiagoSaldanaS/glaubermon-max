@@ -1,0 +1,396 @@
+"""Vectorized Gen 9 Damage Calculator & Damage Roll Inversion Engine."""
+
+import math
+from typing import List, Optional, Tuple, Any
+from glaubermon.core.types import PokemonType, MoveCategory, Weather, Terrain, StatusCondition
+from glaubermon.core.constants import get_type_effectiveness, DAMAGE_ROLLS, clean_key
+from glaubermon.core.pokemon import Pokemon, Move
+
+
+SLICING_MOVES = {
+    "kowtowcleave", "ceaselessedge", "razorshell", "aquacutter", "aerialace",
+    "aircutter", "airslash", "crosspoison", "cut", "furycutter", "nightslash",
+    "psychocut", "sacredsword", "slash", "solarblade", "stoneaxe", "xscissor",
+    "bitterblade", "mightycleave", "tachyoncutter", "psyblade"
+}
+
+TYPE_BOOSTING_ITEMS = {
+    "blackglasses": PokemonType.DARK,
+    "charcoal": PokemonType.FIRE,
+    "mysticwater": PokemonType.WATER,
+    "miracleseed": PokemonType.GRASS,
+    "magnet": PokemonType.ELECTRIC,
+    "spelltag": PokemonType.GHOST,
+    "sharpbeak": PokemonType.FLYING,
+    "silkscarf": PokemonType.NORMAL,
+    "softsand": PokemonType.GROUND,
+    "hardstone": PokemonType.ROCK,
+    "nevermeltice": PokemonType.ICE,
+    "dragonfang": PokemonType.DRAGON,
+    "poisonbarb": PokemonType.POISON,
+    "twistedspoon": PokemonType.PSYCHIC,
+    "blackbelt": PokemonType.FIGHTING,
+    "metalcoat": PokemonType.STEEL,
+}
+
+NON_CONTACT_PHYSICAL = {
+    "earthquake", "stoneedge", "rockslide", "rockblast", "iciclespear",
+    "seedbomb", "razorleaf", "bonemerang", "bonerush", "bulletseed",
+    "pinmissile", "tailslap", "scaleburst", "pyroball", "gunkshot"
+}
+
+CONTACT_SPECIAL = {
+    "drainingkiss", "grassknot", "infestation", "petaldance", "electrodrift"
+}
+
+
+def is_contact_move(move_id: str, category: MoveCategory = MoveCategory.PHYSICAL) -> bool:
+    """Determine whether a move makes physical contact according to canonical Showdown data."""
+    try:
+        from glaubermon.data.showdown_dex import ShowdownDex
+        return ShowdownDex.get_instance().get_move(move_id).is_contact
+    except Exception:
+        m_clean = clean_key(move_id)
+        if category == MoveCategory.PHYSICAL:
+            return m_clean not in NON_CONTACT_PHYSICAL
+        elif category == MoveCategory.SPECIAL:
+            return m_clean in CONTACT_SPECIAL
+        return False
+
+
+NON_REMOVABLE_ITEMS = {
+    "wellspringmask", "hearthflamemask", "cornerstonemask",
+    "griseousorb", "griseouscore", "rustedsword", "rustedshield"
+}
+
+
+def is_removable_item(item: Optional[str]) -> bool:
+    """Check if an item can be removed by Knock Off in Gen 9."""
+    if not item:
+        return False
+    clean = clean_key(item)
+    return clean not in NON_REMOVABLE_ITEMS
+
+
+SHEER_FORCE_MOVES = {
+    "ironhead", "flamethrower", "fireblast", "earthpower", "icebeam", "thunderbolt",
+    "scald", "rockslide", "playrough", "sludgebomb", "zenheadbutt", "crunch",
+    "blizzard", "thunder", "focusblast", "hurricane", "waterfall", "bodyslam",
+    "poisonjab", "psychic", "shadowball", "bugbuzz", "flashcannon", "darkpulse"
+}
+
+
+def calculate_damage_rolls(
+    attacker: Pokemon,
+    defender: Pokemon,
+    move: Move,
+    weather: Weather = Weather.NONE,
+    terrain: Terrain = Terrain.NONE,
+    is_critical: bool = False,
+    fallen_allies: int = 0,
+    attacker_side: Optional[Any] = None
+) -> List[int]:
+    """Calculate all 16 discrete damage rolls for a move in Gen 9."""
+    m_id = move.id.lower().replace(" ", "").replace("-", "")
+
+    # 1. Fixed Damage Moves
+    if m_id in ("ruination", "superfang"):
+        half_hp = max(1, defender.current_hp // 2)
+        return [half_hp] * 16
+    elif m_id in ("nightshade", "seismictoss"):
+        return [max(1, attacker.level)] * 16
+
+    if move.category == MoveCategory.STATUS or move.base_power <= 0:
+        return [0] * 16
+
+    # 2. Check protection
+    if getattr(defender, "is_protected", False):
+        return [0] * 16
+
+    # 3. Dynamic move typing (e.g. Ivy Cudgel changes type with Ogerpon's mask)
+    move_type = move.move_type
+    if m_id == "ivycudgel":
+        if attacker.species == "Ogerpon-Wellspring" or (attacker.item and "wellspring" in attacker.item.lower()):
+            move_type = PokemonType.WATER
+        elif attacker.species == "Ogerpon-Hearthflame" or (attacker.item and "hearthflame" in attacker.item.lower()):
+            move_type = PokemonType.FIRE
+        elif attacker.species == "Ogerpon-Cornerstone" or (attacker.item and "cornerstone" in attacker.item.lower()):
+            move_type = PokemonType.ROCK
+
+    def_ability = (defender.ability or "").lower().replace("-", "").replace(" ", "")
+    atk_ability = (attacker.ability or "").lower().replace("-", "").replace(" ", "")
+    if not def_ability and defender.species:
+        try:
+            from glaubermon.data.showdown_dex import ShowdownDex
+            def_ability = clean_key(ShowdownDex.get_instance().get_pokemon_ability(defender.species))
+        except Exception:
+            pass
+    if not atk_ability and attacker.species:
+        try:
+            from glaubermon.data.showdown_dex import ShowdownDex
+            atk_ability = clean_key(ShowdownDex.get_instance().get_pokemon_ability(attacker.species))
+        except Exception:
+            pass
+    def_item = (defender.item or "").lower().replace("-", "").replace(" ", "")
+    atk_item = (attacker.item or "").lower().replace("-", "").replace(" ", "")
+
+    # 4. Ability & Item Immunities
+    # Ground immunities: Levitate, Earth Eater, Air Balloon
+    if move_type == PokemonType.GROUND:
+        if "airballoon" in def_item or def_ability in ("levitate", "eartheater"):
+            return [0] * 16
+
+    # Water immunities: Water Absorb, Storm Drain, Dry Skin
+    if move_type == PokemonType.WATER and def_ability in ("waterabsorb", "stormdrain", "dryskin"):
+        return [0] * 16
+
+    # Fire immunities: Flash Fire, Well-Baked Body
+    if move_type == PokemonType.FIRE and def_ability in ("flashfire", "wellbakedbody"):
+        return [0] * 16
+
+    # Electric immunities: Volt Absorb, Lightning Rod, Motor Drive
+    if move_type == PokemonType.ELECTRIC and def_ability in ("voltabsorb", "lightningrod", "motordrive"):
+        return [0] * 16
+
+    # Grass immunities: Sap Sipper
+    if move_type == PokemonType.GRASS and def_ability == "sapsipper":
+        return [0] * 16
+
+    # 5. Type effectiveness
+    def_types = defender.active_types
+    def_t2 = def_types[1] if len(def_types) > 1 else None
+    type_mult = get_type_effectiveness(move_type, def_types[0], def_t2)
+    if type_mult == 0.0:
+        return [0] * 16
+
+    # Wonder Guard: Immune to non-super-effective damage
+    if def_ability == "wonderguard" and type_mult <= 1.0:
+        return [0] * 16
+
+    # 6. Determine Attack and Defense stats (Unaware ignores opponent's stat stages)
+    ignore_atk_boosts = (def_ability == "unaware")
+    ignore_def_boosts = (atk_ability == "unaware")
+
+    if move.category == MoveCategory.PHYSICAL:
+        atk = attacker.effective_stat("atk", ignore_boosts=ignore_atk_boosts)
+        defense = defender.effective_stat("def", ignore_boosts=ignore_def_boosts)
+        if atk_ability in ("hugepower", "purepower"):
+            atk = int(atk * 2.0)
+        elif atk_ability == "gorillatactics":
+            atk = int(atk * 1.5)
+        if def_ability == "furcoat":
+            defense = int(defense * 2.0)
+        # Table of Tablets: Wo-Chien lowers Attack of all other Pokémon by 25%
+        if def_ability == "tableoftablets" and atk_ability != "tableoftablets":
+            atk = int(atk * 0.75)
+        # Sword of Ruin: Chien-Pao lowers Defense of all other Pokémon by 25%
+        if (atk_ability == "swordofruin" or def_ability == "swordofruin") and def_ability != "swordofruin":
+            defense = int(defense * 0.75)
+    else:
+        atk = attacker.effective_stat("spa", ignore_boosts=ignore_atk_boosts)
+        defense = defender.effective_stat("spd", ignore_boosts=ignore_def_boosts)
+        # Vessel of Ruin: Ting-Lu lowers Special Attack of all other Pokémon by 25%
+        if def_ability == "vesselofruin" and atk_ability != "vesselofruin":
+            atk = int(atk * 0.75)
+        # Beads of Ruin: Chi-Yu lowers Special Defense of all other Pokémon by 25%
+        if (atk_ability == "beadsofruin" or def_ability == "beadsofruin") and def_ability != "beadsofruin":
+            defense = int(defense * 0.75)
+
+    crit_mult = 2.25 if (is_critical and atk_ability == "sniper") else (1.5 if is_critical else 1.0)
+
+    # Base power modifiers: Technician & Knock Off item boost
+    effective_bp = move.base_power
+    if atk_ability == "technician" and 0 < effective_bp <= 60:
+        effective_bp = int(effective_bp * 1.5)
+    if m_id == "knockoff" and is_removable_item(defender.item):
+        effective_bp = int(effective_bp * 1.5)
+
+    # 7. Base damage formula
+    level_factor = int((2 * attacker.level) / 5) + 2
+    base_damage = int(int((level_factor * effective_bp * atk) / defense) / 50) + 2
+
+    # 8. Weather modifier
+    weather_mult = 1.0
+    if weather == Weather.SUN:
+        if move_type == PokemonType.FIRE:
+            weather_mult = 1.5
+        elif move_type == PokemonType.WATER:
+            # Gen 9 Hydro Steam: power boosted by 1.5x in Sun rather than halved
+            if m_id == "hydrosteam":
+                weather_mult = 1.5
+            else:
+                weather_mult = 0.5
+    elif weather == Weather.RAIN:
+        if move_type == PokemonType.WATER:
+            weather_mult = 1.5
+        elif move_type == PokemonType.FIRE:
+            weather_mult = 0.5
+
+    if m_id in ("solarbeam", "solarblade") and weather in (Weather.RAIN, Weather.SANDSTORM, Weather.SNOW):
+        weather_mult *= 0.5
+
+    # 9. STAB (Same Type Attack Bonus) with Terastallization & Adaptability
+    stab_mult = 1.0
+    base_types = [t for t in attacker.types if t is not None]
+    has_adaptability = (atk_ability == "adaptability")
+
+    if attacker.is_terastallized and attacker.tera_type:
+        is_tera_type_move = (move_type == attacker.tera_type)
+        is_base_type_move = (move_type in base_types)
+
+        if is_tera_type_move and is_base_type_move:
+            # Tera matches base type: 2.0x STAB (2.25x with Adaptability)
+            stab_mult = 2.25 if has_adaptability else 2.0
+        elif is_tera_type_move:
+            # Tera is new type: 1.5x STAB (2.0x with Adaptability)
+            stab_mult = 2.0 if has_adaptability else 1.5
+        elif is_base_type_move:
+            # Original base type retains 1.5x STAB (2.0x with Adaptability)
+            stab_mult = 2.0 if has_adaptability else 1.5
+    else:
+        if move_type in base_types:
+            stab_mult = 2.0 if has_adaptability else 1.5
+
+    # 10. Burn penalty on physical moves (Facade ignores burn drop)
+    burn_mult = 1.0
+    if attacker.status == StatusCondition.BURN and move.category == MoveCategory.PHYSICAL and m_id != "facade":
+        burn_mult = 0.5
+
+    # 11. Ability Damage Multipliers
+    ability_mult = 1.0
+
+    # Supreme Overlord: Kingambit +10% per fainted ally (up to 5 fallen = +50%)
+    if atk_ability == "supremeoverlord":
+        f_count = fallen_allies
+        if attacker_side is not None and hasattr(attacker_side, "fainted_count"):
+            f_count = attacker_side.fainted_count
+        elif hasattr(attacker, "fallen_allies"):
+            f_count = attacker.fallen_allies
+        ability_mult *= (1.0 + 0.10 * min(5, max(0, f_count)))
+
+    # Sharpness: +50% to slicing moves
+    if atk_ability == "sharpness" and (getattr(move, "is_slicing", False) or m_id in SLICING_MOVES):
+        ability_mult *= 1.5
+
+    # Sheer Force: +30% to moves with secondary effects
+    if atk_ability == "sheerforce" and m_id in SHEER_FORCE_MOVES:
+        ability_mult *= 1.3
+
+    # Tough Claws: +30% to contact moves
+    if atk_ability == "toughclaws" and (getattr(move, "is_contact", False) or is_contact_move(m_id, move.category)):
+        ability_mult *= 1.3
+
+    # Water Bubble: 2.0x Water damage dealt, 0.5x Fire damage taken
+    if atk_ability == "waterbubble" and move_type == PokemonType.WATER:
+        ability_mult *= 2.0
+    if def_ability == "waterbubble" and move_type == PokemonType.FIRE:
+        ability_mult *= 0.5
+
+    # Tinted Lens: 2.0x damage if resisted
+    if atk_ability == "tintedlens" and type_mult < 1.0:
+        ability_mult *= 2.0
+
+    # Multiscale / Shadow Shield: 0.5x damage taken when at full HP
+    if def_ability in ("multiscale", "shadowshield") and defender.current_hp == defender.max_hp:
+        ability_mult *= 0.5
+
+    # Ice Scales: 0.5x Special damage taken
+    if def_ability == "icescales" and move.category == MoveCategory.SPECIAL:
+        ability_mult *= 0.5
+
+    # Purifying Salt: 0.5x Ghost damage taken
+    if def_ability == "purifyingsalt" and move_type == PokemonType.GHOST:
+        ability_mult *= 0.5
+
+    # Heatproof: 0.5x Fire damage taken
+    if def_ability == "heatproof" and move_type == PokemonType.FIRE:
+        ability_mult *= 0.5
+
+    # Fluffy: 0.5x contact damage, 2.0x Fire damage
+    if def_ability == "fluffy":
+        if getattr(move, "is_contact", False) or is_contact_move(m_id, move.category):
+            ability_mult *= 0.5
+        if move_type == PokemonType.FIRE:
+            ability_mult *= 2.0
+
+    # Solid Rock / Filter / Prism Armor: 0.75x damage taken from super-effective moves
+    if def_ability in ("solidrock", "filter", "prismarmor") and type_mult > 1.0:
+        ability_mult *= 0.75
+
+    # 12. Item Multipliers
+    item_mult = 1.0
+    if atk_item:
+        if "lifeorb" in atk_item:
+            item_mult *= 1.3
+        elif "wellspringmask" in atk_item and move_type == PokemonType.WATER:
+            item_mult *= 1.2
+        elif "hearthflamemask" in atk_item and move_type == PokemonType.FIRE:
+            item_mult *= 1.2
+        elif "cornerstonemask" in atk_item and move_type == PokemonType.ROCK:
+            item_mult *= 1.2
+        elif "expertbelt" in atk_item and type_mult > 1.0:
+            item_mult *= 1.2
+        else:
+            for it_key, b_type in TYPE_BOOSTING_ITEMS.items():
+                if it_key in atk_item and move_type == b_type:
+                    item_mult *= 1.2
+                    break
+
+    # Intermediate calculation before discrete rolls
+    mod_damage = base_damage
+    mod_damage = int(mod_damage * weather_mult)
+    if is_critical:
+        mod_damage = int(mod_damage * crit_mult)
+    mod_damage = int(mod_damage * stab_mult)
+    mod_damage = int(mod_damage * type_mult)
+    mod_damage = int(mod_damage * burn_mult)
+    mod_damage = int(mod_damage * ability_mult)
+    mod_damage = int(mod_damage * item_mult)
+
+    # 13. Apply 16 discrete damage rolls (85% to 100%)
+    rolls = []
+    for roll in DAMAGE_ROLLS:
+        final_dmg = max(1, int(mod_damage * roll))
+        rolls.append(final_dmg)
+
+    return rolls
+
+
+def invert_damage_to_stat_bounds(
+    observed_damage: int,
+    attacker: Pokemon,
+    defender: Pokemon,
+    move: Move,
+    target_stat_is_attacker: bool = True
+) -> Tuple[int, int]:
+    """Invert an observed damage value to find the exact range of feasible stats.
+    
+    Returns (min_stat, max_stat) bounding the opponent's unrevealed offensive or defensive stat.
+    """
+    if observed_damage <= 0 or move.base_power <= 0:
+        return (1, 999)
+
+    possible_stats = []
+    # Search over possible realistic stat values [50, 600]
+    for test_stat in range(50, 601):
+        test_atk = attacker.clone()
+        test_def = defender.clone()
+        if target_stat_is_attacker:
+            if move.category == MoveCategory.PHYSICAL:
+                test_atk.raw_stats["atk"] = test_stat
+            else:
+                test_atk.raw_stats["spa"] = test_stat
+        else:
+            if move.category == MoveCategory.PHYSICAL:
+                test_def.raw_stats["def"] = test_stat
+            else:
+                test_def.raw_stats["spd"] = test_stat
+
+        rolls = calculate_damage_rolls(test_atk, test_def, move)
+        if min(rolls) <= observed_damage <= max(rolls):
+            possible_stats.append(test_stat)
+
+    if not possible_stats:
+        return (50, 600)
+
+    return (min(possible_stats), max(possible_stats))

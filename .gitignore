@@ -1,0 +1,34 @@
+﻿# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Testing & Caches
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Sensitive Configuration & Passwords
+showdown_config.json
+.env
+
+# Large Datasets & Cache Files (>50MB / 8.2GB)
+data/*.pt
+data/*.parquet
+data/grandmaster_dataset_cache.pt
+
+# Intermediate training checkpoints (Keep latest and elite models)
+checkpoints/glaubermon_rebel_*000g.pt
+checkpoints/*backup*.pt
+
+# Scratch & Temporary Debug Logs
+scratch/
+scratch_*.txt
+test_cand_script.py
+test_turn26.py
+test_vtm.py
