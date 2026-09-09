@@ -454,8 +454,9 @@ class SubgameResolver:
         p1_sucker_streak: int = 0,
         last_action_was_switch: bool = False,
         cand_beam: Optional[Tuple[int, int]] = None,
-        is_leaf_eval: bool = False
-    ) -> Tuple[Action, np.ndarray, List[Action], float]:
+        is_leaf_eval: bool = False,
+        return_both_players: bool = False
+    ) -> Tuple:
         """Compute the Nash Equilibrium mixed strategy for the current turn.
 
         Returns:
@@ -463,9 +464,12 @@ class SubgameResolver:
             p1_strategy: The full Nash probability distribution over p1_actions.
             p1_actions: List of valid actions for P1.
             expected_value: The game-theoretic value of the position.
+            (optional if return_both_players=True): chosen_action_p2, p2_strategy, p2_actions
         """
         if state.is_game_over:
             val = 1.0 if state.winner == 1 else -1.0
+            if return_both_players:
+                return (None, np.array([]), [], val, None, np.array([]), [])
             return (None, np.array([]), [], val)
 
         p1_actions = p1_actions_override if p1_actions_override is not None else state.get_valid_actions(player=1)
@@ -1488,7 +1492,7 @@ class SubgameResolver:
                     if len(cand_p2) >= min(max_cand_p2, m):
                         break
 
-            child_beam = (2, 2) if (depth - 1) >= 2 else None
+            child_beam = (2, 2)
             is_child_leaf = (depth - 1 == 1)
 
             for i in cand_p1:
@@ -1555,5 +1559,12 @@ class SubgameResolver:
             chosen_idx = np.random.choice(n, p=p1_strat)
         else:
             chosen_idx = int(np.argmax(p1_strat))
+
+        if return_both_players:
+            if sample:
+                chosen_idx2 = np.random.choice(m, p=p2_strat)
+            else:
+                chosen_idx2 = int(np.argmax(p2_strat))
+            return p1_actions[chosen_idx], p1_strat, p1_actions, game_value, p2_actions[chosen_idx2], p2_strat, p2_actions
 
         return p1_actions[chosen_idx], p1_strat, p1_actions, game_value

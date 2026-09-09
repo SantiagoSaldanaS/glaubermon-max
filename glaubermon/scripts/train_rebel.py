@@ -117,6 +117,8 @@ class AlphaZeroTrainer:
         d_model: int = 256,
         nhead: int = 8,
         lr: float = 3e-4,
+        depth: int = 1,
+        evaluator_type: str = "hybrid",
         device: Optional[torch.device] = None,
         reset_from_scratch: bool = False
     ):
@@ -125,8 +127,10 @@ class AlphaZeroTrainer:
         self.latest_ckpt = os.path.join(self.checkpoint_dir, "glaubermon_rebel_latest.pt")
         self.meta_path = os.path.join(self.checkpoint_dir, "rebel_meta.json")
 
+        self.depth = depth
+        self.evaluator_type = (evaluator_type or "hybrid").lower().strip()
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"AlphaZero / ReBeL Engine Initialized on: {self.device} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'})")
+        print(f"AlphaZero / ReBeL Engine Initialized on: {self.device} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}) | Depth: {self.depth} | Evaluator: {self.evaluator_type.upper()}")
 
         # 1. Initialize Model
         self.model = GlaubermonMaxNet(d_model=d_model, nhead=nhead, num_actions=14).to(self.device)
@@ -137,7 +141,13 @@ class AlphaZeroTrainer:
         self.policy_loss_fn = nn.CrossEntropyLoss()
 
         self.replay_buffer = AlphaZeroReplayBuffer(capacity=25000)
-        self.evaluator = HeuristicEvaluator()
+        if self.evaluator_type == "hybrid":
+            self.evaluator = HybridEvaluator(NeuralEvaluator(self.model, self.device), HeuristicEvaluator(), weight_neural=0.60)
+        elif self.evaluator_type == "neural":
+            self.evaluator = NeuralEvaluator(self.model, self.device)
+        else:
+            self.evaluator = HeuristicEvaluator()
+
         self.resolver = SubgameResolver(evaluator=self.evaluator)
 
         # Meta tracking
@@ -226,12 +236,12 @@ class AlphaZeroTrainer:
 
             state_tensors = encode_battle_state(state)
 
-            # Solve for P1
-            act1, p1_strat, actions1, _ = self.resolver.resolve_turn(state, depth=1, sample=True)
-
-            # Solve for P2 (perspective inverted)
-            inv_state = BattleState(p1=state.p2, p2=state.p1, weather=state.weather, terrain=state.terrain, turn=state.turn)
-            act2, _, _, _ = self.resolver.resolve_turn(inv_state, depth=1, sample=True)
+            # Solve simultaneous turn for BOTH players in a single resolution pass
+            t_turn_start = time.time()
+            act1, p1_strat, actions1, _, act2, p2_strat, actions2 = self.resolver.resolve_turn(
+                state, depth=self.depth, sample=True, return_both_players=True
+            )
+            turn_elapsed = time.time() - t_turn_start
 
             # Encode search policy distribution into exact 14-dim action logit targets
             target_policy = np.zeros(14, dtype=np.float32)
@@ -239,7 +249,7 @@ class AlphaZeroTrainer:
                 idx = action_to_logit_index(a)
                 target_policy[idx] += p
 
-            trajectory.append((state_tensors, target_policy))
+            trajectory.append((state_tensors, target_policy, turn_elapsed))
 
             # Execute turn
             state = simulate_turn_transition(state, act1, act2)
@@ -264,10 +274,10 @@ class AlphaZeroTrainer:
             # Domain-grounded terminal score on turn cap (material, HP, hazards)
             outcome = float(HeuristicEvaluator().evaluate(state))
 
-        # Pair trajectory states with outcome
+        # Pair trajectory states with outcome and turn timing
         game_data = []
-        for state_t, target_policy in trajectory:
-            game_data.append((state_t, target_policy, outcome))
+        for state_t, target_policy, turn_elapsed in trajectory:
+            game_data.append((state_t, target_policy, outcome, turn_elapsed))
         return game_data
 
     def train_step(self, batch_size: int = 256) -> Tuple[float, float]:
@@ -357,52 +367,93 @@ class AlphaZeroTrainer:
 
         return wins / max(1, num_games)
 
-    def train(self, games_to_play: int = 1000, save_every: int = 10, eval_every: int = 25):
-        target_games = self.total_games + games_to_play
+    def train(self, games_to_play: Optional[int] = None, max_steps: Optional[int] = None, save_every: int = 10, eval_every: int = 25):
+        target_steps = (self.total_turns + max_steps) if max_steps is not None else None
+        target_games = (self.total_games + games_to_play) if games_to_play is not None else (self.total_games + 1000)
+
         print("=" * 75)
-        print("  GLAUBERMON MAX: ALPHAZERO SELF-PLAY REINFORCEMENT LEARNING")
-        print(f"  Playing {games_to_play} new self-play matches ({self.total_games} -> {target_games} total)")
-        print(f"  Auto-saving every {save_every} games | Benchmarking every {eval_every} games")
-        print("  Press Ctrl+C at any time to pause and save safely.")
+        print(f"  GLAUBERMON MAX: ALPHAZERO SELF-PLAY REINFORCEMENT LEARNING")
+        print(f"  Search Lookahead: Depth {self.depth} (Ply {self.depth}) | Evaluator: {self.evaluator_type.upper()}")
+        print(f"  Compute Device: {self.device} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'})")
+        if target_steps is not None:
+            print(f"  Execution Target: {max_steps} turns/steps total (starting from turn {self.total_turns})")
+        else:
+            print(f"  Execution Target: {games_to_play} games total (starting from game {self.total_games})")
+        print(f"  Auto-saving every {save_every} games | Press Ctrl+C at any time to pause and save.")
         print("=" * 75)
 
-        pbar = tqdm(total=target_games, initial=self.total_games, desc="AlphaZero Self-Play")
+        total_target = max_steps if max_steps is not None else target_games
+        pbar = tqdm(total=total_target, initial=0 if max_steps is not None else self.total_games, desc=f"Ply-{self.depth} Steps" if max_steps else "AlphaZero Self-Play")
 
-        while self.total_games < target_games:
+        step_times = []
+        session_steps = 0
+        v_loss, p_loss = 0.0, 0.0
+
+        while True:
+            if target_steps is not None and self.total_turns >= target_steps:
+                break
+            if target_steps is None and self.total_games >= target_games:
+                break
+
             # 1. Play Self-Play Match
             samples = self.play_self_play_game()
             for s in samples:
-                self.replay_buffer.push(*s)
+                state_t, target_pol, out, elapsed = s
+                self.replay_buffer.push(state_t, target_pol, out)
+                step_times.append(elapsed)
+                session_steps += 1
+                self.total_turns += 1
+                if max_steps is not None:
+                    pbar.update(1)
+                    avg_speed = np.mean(step_times[-10:]) if step_times else 0.0
+                    pbar.set_postfix({"s/step": f"{avg_speed:.2f}s", "V-Loss": f"{v_loss:.3f}", "P-Loss": f"{p_loss:.3f}"})
+                    if self.total_turns >= target_steps:
+                        break
+
             self.total_games += 1
-            self.total_turns += len(samples)
-            pbar.update(1)
+            if max_steps is None:
+                pbar.update(1)
 
             # 2. Train network on experience replay buffer
-            if len(self.replay_buffer) >= 64:
+            if len(self.replay_buffer) >= 32:
                 v_loss, p_loss = self.train_step(batch_size=min(256, len(self.replay_buffer)))
-                pbar.set_postfix({"V-Loss": f"{v_loss:.3f}", "P-Loss": f"{p_loss:.3f}", "Buffer": len(self.replay_buffer)})
+                if max_steps is None:
+                    pbar.set_postfix({"V-Loss": f"{v_loss:.3f}", "P-Loss": f"{p_loss:.3f}", "Buffer": len(self.replay_buffer)})
 
             # 3. Periodic Checkpointing
             if self.total_games % save_every == 0:
                 self.save_checkpoint()
 
             # 4. Periodic Arena Benchmark vs Baseline
-            if self.total_games % eval_every == 0:
+            if eval_every > 0 and self.total_games % eval_every == 0:
                 win_rate = self.evaluate_vs_baseline(num_games=4)
                 print(f"\n[Arena Benchmark @ Game {self.total_games}] Winrate vs Heuristic Baseline: {win_rate * 100:.1f}%\n")
 
         pbar.close()
         self.save_checkpoint()
-        print(f"\nTraining session complete! {self.total_games} total games recorded.")
+
+        avg_time = np.mean(step_times) if step_times else 0.0
+        total_time = sum(step_times)
+        print("\n" + "=" * 75)
+        print(f"  BENCHMARK SUMMARY FOR DEPTH {self.depth} (PLY {self.depth}):")
+        print(f"  Completed {session_steps} steps in {total_time:.2f} seconds ({total_time / 60:.2f} minutes)")
+        print(f"  Average Speed: {avg_time:.3f} seconds per step/turn")
+        print(f"  Throughput: {60.0 / max(0.001, avg_time):.1f} steps/minute ({3600.0 / max(0.001, avg_time):.1f} steps/hour)")
+        print(f"  Final Losses -> Value Loss (MSE): {v_loss:.4f} | Policy Loss (CE): {p_loss:.4f}")
+        print("=" * 75 + "\n")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Glaubermon Max AlphaZero / ReBeL Self-Play Trainer")
-    parser.add_argument("--games", type=int, default=500, help="Target total games to reach")
+    parser.add_argument("--games", type=int, default=None, help="Target games to play")
+    parser.add_argument("--steps", type=int, default=None, help="Target total steps/turns to play and train")
+    parser.add_argument("--depth", type=int, default=1, choices=[1, 2, 3, 4], help="Lookahead depth: 1 (1-ply), 2 (2-ply), 3 (3-ply)")
+    parser.add_argument("--evaluator", type=str, default="heuristic", choices=["heuristic", "hybrid", "neural"], help="Evaluator type during subgame search")
     parser.add_argument("--save-every", type=int, default=10, help="Save model every N games")
-    parser.add_argument("--eval-every", type=int, default=25, help="Run arena evaluation every N games")
+    parser.add_argument("--eval-every", type=int, default=0, help="Run arena evaluation every N games (0 to disable)")
     parser.add_argument("--from-scratch", action="store_true", help="Train from scratch without loading prior weights")
     args = parser.parse_args()
 
-    trainer = AlphaZeroTrainer(reset_from_scratch=args.from_scratch)
-    trainer.train(games_to_play=args.games, save_every=args.save_every, eval_every=args.eval_every)
+    default_games = 500 if args.steps is None else None
+    trainer = AlphaZeroTrainer(depth=args.depth, evaluator_type=args.evaluator, reset_from_scratch=args.from_scratch)
+    trainer.train(games_to_play=args.games or default_games, max_steps=args.steps, save_every=args.save_every, eval_every=args.eval_every)
