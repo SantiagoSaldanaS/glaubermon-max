@@ -298,4 +298,32 @@ Each turn, you can do one of two things:
 - **Q: Can I use my own custom team?**
   - Absolutely! As long as the team complies with standard **[Gen 9] OU** rules (no banned Ubers like Koraidon, Miraidon, or Calyrex), the bot will happily battle you.
 
+---
+
+## 📩 Help Us Improve Glaubermax! (Report Bugs & Win Replays)
+
+Did you manage to defeat the bot? Did you notice strange decisions, passive stalling, or unexpected switch loops?
+
+**We want your battle logs!** Glaubermax is a research-driven competitive AI, and every defeat or unexpected interaction helps us refine its game-theoretic models and neural network weights.
+
+### How to Send Your Battle Replay (30 Seconds):
+
+1. **Option 1: Upload & Share Replay Link (Easiest)**
+   - When the battle ends, look at the right-side control panel.
+   - Click the green or blue button: **"Upload and share replay"**.
+   - Copy the generated URL (e.g., `https://replay.pokemonshowdown.com/gen9ou-1234567890`).
+
+2. **Option 2: Download the Battle Log**
+   - In the battle room, click the **Gear (⚙️ Settings)** icon or battle options.
+   - Click **"Download log"** or simply highlight and copy the text from the chat log.
+
+3. **Email It to the Creator**:
+   - 📬 **Destination Email**: **[A01708446@tec.mx](mailto:A01708446@tec.mx)**
+   - **Subject**: `Glaubermax Battle Log - [Your Showdown Username]`
+   - **Body**: Paste the replay link or log file, along with a quick note describing what happened (e.g., *"I won on Turn 25 using Dragon Dance"*, *"Bot got caught in a switch loop on Turn 8"*).
+
+Your match data will be analyzed directly in our test harness to train stronger models and patch strategic blindspots. Thank you for helping make Glaubermax world-class! 🚀
+
+---
+
 **Good luck, Trainer! See if you have what it takes to outsmart Glaubermax!** 🏆
