@@ -40,11 +40,11 @@ El package-lock oficial se incluye en `tools/showdown/`. El workspace actual tam
 ## Validación y alcance
 
 - Pasan 134 tests. Se prueban aislamiento de canales oficiales, reproducibilidad de semillas, rechazo de equipos ilegales, invariancia de observaciones ante sets secretos diferentes, revelación de movimientos, etiquetas de truncado y actualización real del optimizador.
-- El piloto de entrenamiento con los pesos originales completó dos partidas oficiales: 48 turnos y 117 ejemplos entre ambos lados, con una actualización real. Tardó entre 12 y 14 s en dos ejecuciones en CPU, profundidad 1, con otros procesos de evaluación activos. Esto verifica ejecución, no superioridad del nuevo checkpoint.
+- El piloto de entrenamiento con los pesos originales completó dos partidas oficiales: 48 turnos y 117 ejemplos entre ambos lados, con una actualización real. Tardó aproximadamente 12–15 s en repeticiones en CPU, profundidad 1, con otros procesos de evaluación activos. El checkpoint final del piloto está en `runs/official-training-ready-v2/`; se verificó que todos sus parámetros son finitos y que reanudar recupera exactamente pesos y contadores. Esto verifica ejecución, no superioridad del nuevo checkpoint.
 - Microbenchmark de codificación: mediana de 200 codificaciones del mismo estado 6v6 de 132.6 ms a 92.7 ms (aprox. 30% menos tiempo), siete repeticiones intercaladas con cache caliente. Los tensores coinciden exactamente. No representa una aceleración de todo el entrenamiento.
 - La evaluación externa congela `01a6ee1` y el checkpoint original: 100 partidas híbridas y 100 heurísticas, profundidad 2, intercambiando equipos/lados por bloque. Sus resultados quedan en `../evaluation-results/official-pilot-01a6ee1/`. Esa versión es anterior a las últimas correcciones del lector y al entrenamiento de prueba.
 
-No se certifica equivalencia del motor rápido con Showdown. Siguen pendientes sus mecánicas incompletas, mejores creencias sobre el rival, ampliar los equipos de práctica, reanudar el estado completo de optimización y evaluar el checkpoint nuevo. Metamon y Foul Play quedan para la comparación siguiente; este piloto contra SimpleHeuristicsPlayer no certifica SOTA.
+No se certifica equivalencia del motor rápido con Showdown. Siguen pendientes sus mecánicas incompletas, señales del cliente aún ausentes (por ejemplo pantallas y Trick Room), mejores creencias sobre el rival, ampliar los equipos de práctica, reanudar el estado completo de optimización y evaluar el checkpoint nuevo. Metamon y Foul Play quedan para la comparación siguiente; este piloto contra SimpleHeuristicsPlayer no certifica SOTA.
 
 ---
 
