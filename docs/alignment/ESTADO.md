@@ -33,6 +33,8 @@ Referencia: paquete fijado **Pokémon Showdown 0.11.11**, Gen 9 custom game, con
 - Total: **5,695 ejecuciones oficiales**. Se comparan HP, estado, PP, boosts, objetos, volátiles, hazards, jugador que debe reemplazar y contador de turno. En los casos aleatorios se comparan soportes/frecuencias con tolerancias explícitas, no resultados idénticos por semilla: los RNG son diferentes.
 - Suite completa: **227 pruebas aprobadas**, incluyendo protocolo→tensores, aislamiento entre lados, compatibilidad de pesos, independencia de ramas y bloqueo de entrenamiento.
 
+Además, se completaron 12 partidas locales de integración sin acciones inválidas, fallbacks ni timeouts. La evaluación por lotes conservó las decisiones de las dos partidas comparadas y redujo el máximo observado de 26.787 a 15.534 s. Detalle y fuentes: [INTEGRACION.md](INTEGRACION.md).
+
 Estos fixtures controlados no certifican reglas completas de OU ni equivalencia general entre motores.
 
 ## Pendiente antes de levantar la pausa
