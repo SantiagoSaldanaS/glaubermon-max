@@ -1,0 +1,37 @@
+{
+  "showdown": "../showdown-parity/node_modules/pokemon-showdown",
+  "output": "../evaluation-results/official-pilot-01a6ee1",
+  "checkpoint": "checkpoints/glaubermon_rebel_latest.pt",
+  "games": 100,
+  "jobs": 4,
+  "depth": 2,
+  "modes": [
+    "hybrid",
+    "heuristic"
+  ],
+  "seed": 911,
+  "max_turns": 300,
+  "decision_seconds": 30,
+  "python": "3.12.13",
+  "hardware": "macOS-26.6.2-arm64-arm-64bit",
+  "torch": "2.14.0",
+  "poke_env": "0.16.1",
+  "source": "01a6ee10fd9381114472c7ad9871feb2748847a4",
+  "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "checkpoint_sha256": "2aa0deadf7d3ac650981e051544521ee8ccc0b9689f1457f921c0ed99957f0f6",
+  "teams": {
+    "balance": "Great Tusk||boosterenergy|protosynthesis|closecombat,headlongrush,icespinner,rapidspin|Jolly|,252,,,4,252|||||,,,,,Ice]Gholdengo||airballoon|goodasgold|makeitrain,shadowball,nastyplot,recover|Timid|,,,252,4,252|||||,,,,,Fighting]Kingambit||blackglasses|supremeoverlord|kowtowcleave,suckerpunch,ironhead,swordsdance|Adamant|212,252,,,,44|||||,,,,,Flying]Dragapult||choicespecs|infiltrator|dracometeor,shadowball,flamethrower,uturn|Timid|,,,252,4,252|||||,,,,,Ghost]Ogerpon-Wellspring||wellspringmask|waterabsorb|ivycudgel,hornleech,playrough,spikyshield|Jolly|,252,,,4,252|||||,,,,,Water]Ting-Lu||leftovers|vesselofruin|earthquake,ruination,stealthrock,whirlwind|Impish|252,,4,,252,|||||,,,,,Poison",
+    "stall": "Dondozo||leftovers|unaware|liquidation,bodypress,rest,sleeptalk|Impish|252,,252,,,4|||||,,,,,Grass]Gliscor||toxicorb|poisonheal|earthquake,toxic,protect,spikes|Careful|244,,12,,252,|||||,,,,,Water]Corviknight||leftovers|pressure|bravebird,bodypress,roost,defog|Impish|248,,252,,,8|||||,,,,,Dragon]Heatran||leftovers|flashfire|magmastorm,earthpower,flashcannon,stealthrock|Calm|252,,,4,252,|||||,,,,,Grass]Great Tusk||heavydutyboots|protosynthesis|rapidspin,knockoff,earthquake,icespinner|Impish|252,,252,,,4|||||,,,,,Water]Kingambit||leftovers|supremeoverlord|kowtowcleave,suckerpunch,ironhead,swordsdance|Adamant|212,252,,,,44|||||,,,,,Flying",
+    "pelol": "Iron Valiant||boosterenergy|quarkdrive|moonblast,closecombat,knockoff,thunderbolt|Timid|,,,252,4,252|||||,,,,,Fairy]Gliscor||toxicorb|poisonheal|earthquake,toxic,protect,spikes|Careful|244,,12,,252,|||||,,,,,Water]Great Tusk||boosterenergy|protosynthesis|closecombat,headlongrush,icespinner,rapidspin|Jolly|,252,,,4,252|||||,,,,,Ice]Ting-Lu||leftovers|vesselofruin|earthquake,ruination,stealthrock,whirlwind|Impish|252,,4,,252,|||||,,,,,Poison]Dragapult||choicespecs|infiltrator|dracometeor,shadowball,flamethrower,uturn|Timid|,,,252,4,252|||||,,,,,Ghost]Kingambit||blackglasses|supremeoverlord|kowtowcleave,suckerpunch,ironhead,swordsdance|Adamant|212,252,,,,44|||||,,,,,Flying"
+  },
+  "bridge_sha256": "2950e12b370471720009e32cea8cdc452caad7aa18b997b8077f889c46c0a0f6",
+  "adapter_sha256": "0b437018087c05b245ce89c448262e0f5c14fdcc056fed7cc217630a983b7bba",
+  "showdown_version": "0.11.11",
+  "poke_env_source": "{\"url\":\"https://github.com/hsahovic/poke-env\",\"vcs_info\":{\"vcs\":\"git\",\"commit_id\":\"e3cb976d093008a0b5b8fffbc8db56c2b02ae6c2\",\"requested_revision\":\"e3cb976d093008a0b5b8fffbc8db56c2b02ae6c2\"}}",
+  "rules": "gen9ou",
+  "transport": "official Battle with player-filtered protocol IPC",
+  "decision_timeout_policy": "bot loses",
+  "invalid_action_policy": "offending side loses",
+  "turn_cap_policy": "truncated, no fabricated winner",
+  "threads": 1
+}

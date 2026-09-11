@@ -1,0 +1,62 @@
+{
+  "source": "01a6ee10fd9381114472c7ad9871feb2748847a4",
+  "checkpoint_sha256": "2aa0deadf7d3ac650981e051544521ee8ccc0b9689f1457f921c0ed99957f0f6",
+  "expected_per_mode": 100,
+  "modes": {
+    "hybrid": {
+      "wins": 73,
+      "losses": 27,
+      "draws": 0,
+      "unresolved": 0,
+      "statuses": {
+        "completed": 100
+      },
+      "invalid_actions": 0,
+      "fallbacks": 0,
+      "neural_forward_calls": 185491,
+      "decisions": 4061,
+      "latency_seconds": {
+        "p50": 1.025171582994517,
+        "p95": 1.5987404999905266,
+        "p99": 2.7359165920177477,
+        "p100": 3.917905582988169
+      },
+      "score_mean": 0.73,
+      "block_bootstrap_95ci": [
+        0.65,
+        0.81
+      ]
+    },
+    "heuristic": {
+      "wins": 79,
+      "losses": 21,
+      "draws": 0,
+      "unresolved": 0,
+      "statuses": {
+        "completed": 100
+      },
+      "invalid_actions": 0,
+      "fallbacks": 0,
+      "neural_forward_calls": 0,
+      "decisions": 3957,
+      "latency_seconds": {
+        "p50": 0.1842644169810228,
+        "p95": 0.360794950008858,
+        "p99": 0.46511396148707734,
+        "p100": 0.8294384580221958
+      },
+      "score_mean": 0.79,
+      "block_bootstrap_95ci": [
+        0.7,
+        0.87
+      ]
+    }
+  },
+  "hybrid_minus_heuristic": {
+    "mean": -0.06,
+    "block_bootstrap_95ci": [
+      -0.16,
+      0.04
+    ]
+  }
+}
