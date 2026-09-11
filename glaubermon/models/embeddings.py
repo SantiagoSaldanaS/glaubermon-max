@@ -13,6 +13,8 @@ TERRAIN_MAP = {t: i for i, t in enumerate(Terrain)}
 
 MOVE_DIM = 32
 STAT_DIM = 64
+FIELD_DIM = 40
+FEATURE_SCHEMA = "public_field_v3"
 
 
 _MOVE_ENCODING_CACHE: Dict[Tuple, torch.Tensor] = {}
@@ -99,7 +101,7 @@ def encode_battle_state(state: BattleState) -> Tuple[Tuple[torch.Tensor, torch.T
     Returns:
         p1_tensor: Tuple of (moves (6, 4, 32), stats (6, 64))
         p2_tensor: Tuple of (moves (6, 4, 32), stats (6, 64))
-        field_tensor: Tensor of shape (16,) containing weather, terrain, hazards
+        field_tensor: Tensor of shape (40,) containing weather, terrain, hazards
     """
     p1_moves_t = torch.zeros(6, 4, MOVE_DIM, dtype=torch.float32)
     p1_stats_t = torch.zeros(6, STAT_DIM, dtype=torch.float32)
@@ -158,7 +160,7 @@ def encode_battle_state(state: BattleState) -> Tuple[Tuple[torch.Tensor, torch.T
         else:
             p2_stats_t[i, 0] = 1.0
 
-    field_tensor = torch.zeros(16, dtype=torch.float32)
+    field_tensor = torch.zeros(FIELD_DIM, dtype=torch.float32)
     w_idx = WEATHER_MAP.get(state.weather, 0)
     field_tensor[w_idx % 8] = 1.0
     t_idx = TERRAIN_MAP.get(state.terrain, 0)
@@ -168,6 +170,18 @@ def encode_battle_state(state: BattleState) -> Tuple[Tuple[torch.Tensor, torch.T
     if Hazard.STEALTH_ROCK in state.p2.hazards:
         field_tensor[14] = 1.0
     field_tensor[15] = min(1.0, state.turn / 50.0)
+
+    # Additional public features; negative duration means active, duration unknown.
+    field_tensor[16] = state.trick_room / 5.0
+    field_tensor[17] = state.weather_turns / 8.0
+    field_tensor[18] = state.terrain_turns / 8.0
+    for offset, side in ((19,state.p1),(28,state.p2)):
+        for i, name in enumerate(("reflect","lightscreen","auroraveil")):
+            field_tensor[offset+i] = side.screens.get(name,0) / 8.0
+        field_tensor[offset+3] = side.tailwind / 4.0
+        field_tensor[offset+4] = side.hazards.get(Hazard.SPIKES_1,0) / 3.0
+        field_tensor[offset+5] = side.hazards.get(Hazard.TOXIC_SPIKES_1,0) / 2.0
+        field_tensor[offset+6] = float(bool(side.hazards.get(Hazard.STICKY_WEB,0)))
 
     p1_combined = (p1_moves_t, p1_stats_t)
     p2_combined = (p2_moves_t, p2_stats_t)

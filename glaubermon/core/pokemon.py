@@ -1,5 +1,6 @@
 """Detailed state representation for individual Pokémon and Moves."""
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any
 from glaubermon.core.types import PokemonType, MoveCategory, StatusCondition, Hazard
@@ -33,11 +34,16 @@ class Move:
     crit_ratio: int = 1
     will_crit: bool = False
     blocked_by_protect: bool = True
+    secondaries: List[Dict] = field(default_factory=list)
+    defrost: bool = False
+    sleep_usable: bool = False
+    sleep_talk_callable: bool = True
 
     def clone(self) -> "Move":
         """Copy mutable battle data without reloading or reinterpreting the Dex."""
         result = object.__new__(type(self))
         result.__dict__ = self.__dict__.copy()
+        result.secondaries = deepcopy(self.secondaries) if self.secondaries else []
         result.boosts = dict(self.boosts) if self.boosts is not None else None
         result.self_boosts = dict(self.self_boosts) if self.self_boosts is not None else None
         return result
@@ -70,11 +76,13 @@ class Move:
         blocked_by_protect: Optional[bool] = None,
     ) -> "Move":
         move_id = clean_key(name)
+        secondary_meta = {}
         if any(value is None for value in (pp, is_contact, is_protect, target, always_hits,
                                           crit_ratio, will_crit, blocked_by_protect)):
             try:
                 from glaubermon.data.showdown_dex import ShowdownDex
                 dex_m = ShowdownDex.get_instance().get_move(move_id)
+                secondary_meta = {k:deepcopy(getattr(dex_m,k)) for k in ("secondaries","defrost","sleep_usable","sleep_talk_callable")}
                 if pp is None:
                     pp = dex_m.pp
                 if max_pp is None:
@@ -137,6 +145,7 @@ class Move:
             crit_ratio=1 if crit_ratio is None else crit_ratio,
             will_crit=False if will_crit is None else will_crit,
             blocked_by_protect=True if blocked_by_protect is None else blocked_by_protect,
+            **secondary_meta,
         )
 
     @classmethod

@@ -95,6 +95,9 @@ def test_ruination_and_fixed_damage():
 
     nightshade = Move.create("Night Shade", PokemonType.GHOST, MoveCategory.SPECIAL, base_power=1)
     rolls_ns = calculate_damage_rolls(tinglu, target_300, nightshade)
+    assert rolls_ns == [0]*16  # Normal is immune to Ghost, including fixed damage.
+    target_300.types = (PokemonType.WATER,None)
+    rolls_ns = calculate_damage_rolls(tinglu,target_300,nightshade)
     assert all(r == tinglu.level for r in rolls_ns), f"Expected level {tinglu.level} damage, got {rolls_ns[0]}"
 
 

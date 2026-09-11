@@ -6,11 +6,32 @@ import numpy as np
 from glaubermon.core.battle_state import BattleState
 from glaubermon.core.pokemon import Pokemon, Move
 from glaubermon.core.actions import Action, MoveAction, SwitchAction
-from glaubermon.core.types import ActionType, Hazard, PokemonType, MoveCategory, StatusCondition, Terrain
+from glaubermon.core.types import ActionType, Hazard, PokemonType, MoveCategory, StatusCondition, Terrain, Weather
 from glaubermon.core.constants import get_type_effectiveness, clean_key
 from glaubermon.inference.damage_calc import calculate_damage_rolls, is_contact_move, is_removable_item
 from glaubermon.search.evaluators import StateEvaluator, HeuristicEvaluator
 from glaubermon.search.matrix_solver import solve_zero_sum_game
+
+
+def speed_order_key(mon, side, state):
+    """Comparable speed within one priority bracket, including public field effects."""
+    speed = mon.effective_stat("spe") * (2 if side.tailwind else 1)
+    return -speed if state.trick_room else speed
+
+
+def reset_on_switch(mon):
+    """Switch-out clears temporary state; major status persists except Natural Cure."""
+    mon.boosts = {key:0 for key in mon.boosts}
+    mon.choice_locked_move = None
+    mon.protect_streak = 0
+    mon.protect_success_rate = 0.0
+    mon.booster_stat = None
+    mon.toxic_counter = 0
+    if clean_key(mon.ability) == "naturalcure":
+        mon.status = StatusCondition.NONE
+        mon.status_turns = 0
+    if not mon.is_fainted and clean_key(mon.ability) == "regenerator":
+        mon.heal(max(1, mon.max_hp // 3))
 
 
 def apply_entry_hazards(state: BattleState, side_idx: int, mon_idx: int):
@@ -75,9 +96,7 @@ def simulate_turn_transition(
     if a1 is not None and a1.action_type == ActionType.SWITCH:
         old_mon = s.p1.active_pokemon
         if old_mon:
-            old_mon.choice_locked_move = None
-            if not old_mon.is_fainted and (old_mon.ability or "").lower().replace("-", "").replace(" ", "") == "regenerator":
-                old_mon.heal(max(1, old_mon.max_hp // 3))
+            reset_on_switch(old_mon)
         target_slot = getattr(a1, "target_slot") - 1
         s.p1.active_index = target_slot
         apply_entry_hazards(s, side_idx=1, mon_idx=target_slot)
@@ -87,9 +106,7 @@ def simulate_turn_transition(
     if a2 is not None and a2.action_type == ActionType.SWITCH:
         old_mon = s.p2.active_pokemon
         if old_mon:
-            old_mon.choice_locked_move = None
-            if not old_mon.is_fainted and (old_mon.ability or "").lower().replace("-", "").replace(" ", "") == "regenerator":
-                old_mon.heal(max(1, old_mon.max_hp // 3))
+            reset_on_switch(old_mon)
         target_slot = getattr(a2, "target_slot") - 1
         s.p2.active_index = target_slot
         apply_entry_hazards(s, side_idx=2, mon_idx=target_slot)
@@ -129,8 +146,8 @@ def simulate_turn_transition(
     if m1 and m2:
         prio1 = m1.priority
         prio2 = m2.priority
-        spe1 = p1_active.effective_stat("spe")
-        spe2 = p2_active.effective_stat("spe")
+        spe1 = speed_order_key(p1_active, s.p1, s)
+        spe2 = speed_order_key(p2_active, s.p2, s)
 
         if prio1 > prio2:
             order = [("p1", m1), ("p2", m2)]
@@ -158,10 +175,17 @@ def simulate_turn_transition(
 
     # Execute moves in resolved order
     moved_players = set()
+    flinched = set()
+    selected_users = {"p1":p1_active,"p2":p2_active}
     for player, move in order:
         attacker = p1_active if player == "p1" else p2_active
         defender = p2_active if player == "p1" else p1_active
 
+        if player in flinched:
+            moved_players.add(player)
+            continue
+        if attacker is not selected_users[player]:
+            continue  # A Pokémon dragged out before its turn cannot pass its move to the replacement.
         if attacker and not attacker.is_fainted and defender and not defender.is_fainted:
             m_id = move.id.lower().replace(" ", "").replace("-", "")
             selected = move
@@ -169,24 +193,40 @@ def simulate_turn_transition(
             if not is_protection:
                 attacker.protect_streak = 0
 
-            # Lock Choice items to move executed
+            # Major status is checked before PP is consumed. Unknown sleep duration
+            # is still an explicit approximation in search; rollouts use Showdown.
+            if attacker.status == StatusCondition.SLEEP:
+                attacker.status_turns -= 1 + int(clean_key(attacker.ability) == "earlybird")
+                if attacker.status_turns <= 0:
+                    attacker.status = StatusCondition.NONE
+                    attacker.status_turns = 0
+                elif not move.sleep_usable:
+                    moved_players.add(player)
+                    continue
+            if attacker.status == StatusCondition.PARALYSIS and sample_outcomes and rng.random() < 0.25:
+                moved_players.add(player)
+                continue
+            if attacker.status == StatusCondition.FREEZE:
+                defrost = move.defrost
+                if defrost or (sample_outcomes and rng.random() < 0.20):
+                    attacker.status = StatusCondition.NONE
+                else:
+                    moved_players.add(player)
+                    continue
             atk_it = clean_key(attacker.item)
             if atk_it in ("choicespecs", "choiceband", "choicescarf") and not attacker.choice_locked_move:
                 attacker.choice_locked_move = m_id
-
-            # Check if attacker is asleep
-            if attacker.status == StatusCondition.SLEEP:
-                if m_id == "sleeptalk":
-                    other_moves = [m for m in attacker.moves if m.id.lower().replace(" ", "").replace("-", "") != "sleeptalk"]
-                    if other_moves:
-                        move = rng.choice(other_moves)
-                        m_id = move.id.lower().replace(" ", "").replace("-", "")
+            sleep_talk_failed = False
+            if m_id == "sleeptalk":
+                if attacker.status != StatusCondition.SLEEP:
+                    sleep_talk_failed = True
                 else:
-                    attacker.status_turns -= 1
-                    if attacker.status_turns <= 0:
-                        attacker.status = StatusCondition.NONE
-                    moved_players.add(player)
-                    continue  # Fast asleep, cannot move!
+                    options = [m for m in attacker.moves if m.sleep_talk_callable]
+                    if options:
+                        move = rng.choice(options)
+                        m_id = move.id
+                    else:
+                        sleep_talk_failed = True
 
             # Misses and failed moves consume PP; being KO'd before acting does not.
             # Deduct the selected move, not a move called by Sleep Talk.
@@ -194,6 +234,10 @@ def simulate_turn_transition(
                 cost = 1 + int(clean_key(defender.ability) == "pressure" and selected.target in (
                     "normal", "allAdjacentFoes", "allAdjacent", "any", "randomNormal", "foeSide"))
                 selected.pp = max(0, selected.pp - cost)
+
+            if sleep_talk_failed:
+                moved_players.add(player)
+                continue
 
             # 0. Sucker Punch failure check:
             # Fails if opponent switched, or opponent used a status move, or opponent already moved!
@@ -238,6 +282,9 @@ def simulate_turn_transition(
                     moved_players.add(player)
                     continue
 
+            if move.category == MoveCategory.STATUS and targets_foe and clean_key(defender.ability) == "goodasgold":
+                moved_players.add(player)
+                continue
             actual_dmg = 0
             # 2. Damage calculation
             if move.category in (MoveCategory.PHYSICAL, MoveCategory.SPECIAL):
@@ -253,6 +300,7 @@ def simulate_turn_transition(
                 rolls = calculate_damage_rolls(
                     attacker, defender, move, s.weather, s.terrain,
                     attacker_side=atk_side, is_critical=critical,
+                    defender_side=s.p2 if player == "p1" else s.p1,
                 )
                 median_dmg = rng.choice(rolls) if sample_outcomes else rolls[len(rolls) // 2]
                 # Sampled blocks returned above; moves that bypass Protect reach here.
@@ -262,18 +310,19 @@ def simulate_turn_transition(
                 if succ_rate > 0.0:
                     # Defender takes damage proportional to protect failure rate
                     actual_dmg = int(median_dmg * (1.0 - succ_rate))
-                    defender.take_damage(actual_dmg)
+                    actual_dmg = defender.take_damage(actual_dmg)
                     # Spiky shield chip on physical/special contact when protected
                     if succ_rate > 0.5 and getattr(defender, "last_protect_move", "") == "spikyshield" and is_contact:
                         attacker.take_damage(max(1, attacker.max_hp // 8))
                 else:
-                    actual_dmg = median_dmg
-                    defender.take_damage(median_dmg)
+                    actual_dmg = defender.take_damage(median_dmg)
                     # Rocky Helmet chip on contact when attack connects
                     def_it = clean_key(defender.item)
-                    if def_it == "rockyhelmet" and is_contact:
+                    if actual_dmg > 0 and def_it == "rockyhelmet" and is_contact and clean_key(attacker.ability) != "magicguard":
                         attacker.take_damage(max(1, attacker.max_hp // 6))
 
+                if actual_dmg and defender.status == StatusCondition.FREEZE and move.move_type == PokemonType.FIRE:
+                    defender.status = StatusCondition.NONE
                 if m_id == "struggle":
                     attacker.take_damage(max(1, (attacker.max_hp + 2) // 4))
 
@@ -287,25 +336,25 @@ def simulate_turn_transition(
                         defender.item = None
 
                 # Drain moves: heal attacker by exact canonical ratio or default 50%
-                if getattr(move, "drain", None):
+                if actual_dmg > 0 and getattr(move, "drain", None):
                     num, den = move.drain
                     drain_heal = max(1, actual_dmg * num // den)
                     attacker.heal(drain_heal)
-                elif m_id in ("hornleech", "drainpunch", "gigadrain", "absorb", "megadrain", "drainingkiss", "oblivionwing", "bitterblade", "paraboliccharge"):
+                elif actual_dmg > 0 and m_id in ("hornleech", "drainpunch", "gigadrain", "absorb", "megadrain", "drainingkiss", "oblivionwing", "bitterblade", "paraboliccharge"):
                     drain_heal = max(1, actual_dmg // 2)
                     attacker.heal(drain_heal)
 
                 # Recoil moves: recoil by exact canonical ratio or standard fraction
-                if getattr(move, "recoil", None):
+                if actual_dmg > 0 and clean_key(attacker.ability) not in ("rockhead","magicguard") and getattr(move, "recoil", None):
                     num, den = move.recoil
                     attacker.take_damage(max(1, actual_dmg * num // den))
-                elif m_id in ("bravebird", "flareblitz", "woodhammer", "wavecrash", "doubleedge"):
+                elif actual_dmg > 0 and clean_key(attacker.ability) not in ("rockhead","magicguard") and m_id in ("bravebird", "flareblitz", "woodhammer", "wavecrash", "doubleedge"):
                     attacker.take_damage(max(1, actual_dmg // 3))
-                elif m_id in ("headsmash",):
+                elif actual_dmg > 0 and clean_key(attacker.ability) not in ("rockhead","magicguard") and m_id in ("headsmash",):
                     attacker.take_damage(max(1, actual_dmg // 2))
 
                 # Life Orb recoil (10% max HP)
-                if clean_key(attacker.item) == "lifeorb":
+                if actual_dmg > 0 and clean_key(attacker.item) == "lifeorb" and clean_key(attacker.ability) != "magicguard" and not (clean_key(attacker.ability)=="sheerforce" and move.secondaries):
                     attacker.take_damage(max(1, attacker.max_hp // 10))
 
             # 3. Status, Hazard & Boost effects
@@ -323,11 +372,54 @@ def simulate_turn_transition(
 
             # Data-driven target-boosts / stat drops (Screech, Charm, Chilling Water, Mystical Fire, Icy Wind, etc.)
             if getattr(move, "boosts", None):
-                is_blocked = (succ_rate > 0.5) or (def_ab == "goodasgold" and any(v < 0 for v in move.boosts.values()))
+                is_blocked = (succ_rate > 0.5) or (move.category == MoveCategory.STATUS and def_ab == "goodasgold" and any(v < 0 for v in move.boosts.values()))
                 if not is_blocked:
                     for stat_k, boost_val in move.boosts.items():
                         curr_b = defender.boosts.get(stat_k, 0)
                         defender.boosts[stat_k] = max(-6, min(6, curr_b + boost_val))
+
+            # Data-driven secondary effects. Expected search only applies guaranteed
+            # effects; sampled transitions draw lower probabilities explicitly.
+            if actual_dmg > 0 and clean_key(attacker.ability) != "sheerforce":
+                for sec in move.secondaries:
+                    chance = min(100,sec.get("chance",100)*(2 if clean_key(attacker.ability)=="serenegrace" else 1))
+                    triggered = (rng.random()*100 < chance) if sample_outcomes and chance < 100 else chance >= 100
+                    if not triggered:
+                        continue
+                    for key,delta in sec.get("self",{}).get("boosts",{}).items():
+                        if not attacker.is_fainted:
+                            attacker.boosts[key] = max(-6,min(6,attacker.boosts.get(key,0)+delta))
+                    if defender.is_fainted or def_ab == "shielddust" or clean_key(defender.item)=="covertcloak":
+                        continue
+                    for key,delta in sec.get("boosts",{}).items():
+                        defender.boosts[key] = max(-6,min(6,defender.boosts.get(key,0)+delta))
+                    if sec.get("volatileStatus") == "flinch" and def_ab != "innerfocus":
+                        other = "p2" if player=="p1" else "p1"
+                        if other not in moved_players:
+                            flinched.add(other)
+                    if defender.status == StatusCondition.NONE:
+                        kind = sec.get("status")
+                        immune = ((kind=="brn" and (PokemonType.FIRE in defender.active_types or def_ab in ("waterveil","waterbubble"))) or
+                                  (kind in ("psn","tox") and (PokemonType.POISON in defender.active_types or PokemonType.STEEL in defender.active_types or def_ab=="immunity")) or
+                                  (kind=="par" and (PokemonType.ELECTRIC in defender.active_types or def_ab=="limber")) or
+                                  (kind=="frz" and (PokemonType.ICE in defender.active_types or def_ab=="magmaarmor" or s.weather in (Weather.SUN,Weather.HARSH_SUN))) or
+                                  (defender.is_grounded() and s.terrain==Terrain.MISTY))
+                        if kind and not immune:
+                            statuses={"brn":StatusCondition.BURN,"par":StatusCondition.PARALYSIS,"psn":StatusCondition.POISON,"tox":StatusCondition.TOXIC,"frz":StatusCondition.FREEZE}
+                            if kind in statuses:
+                                defender.status=statuses[kind]
+
+            # Side/field effects are public and have finite cartridge durations.
+            user_side = s.p1 if player == "p1" else s.p2
+            if m_id in ("reflect","lightscreen","auroraveil"):
+                if m_id != "auroraveil" or s.weather == Weather.SNOW:
+                    if not user_side.screens.get(m_id):
+                        user_side.screens[m_id] = 8 if clean_key(attacker.item) == "lightclay" else 5
+            elif m_id == "tailwind":
+                if not user_side.tailwind:
+                    user_side.tailwind = 4
+            elif m_id == "trickroom":
+                s.trick_room = 0 if s.trick_room else 5
 
             # Additional field / status mechanics
             if m_id in ("rapidspin", "mortalspin", "tidyup"):
@@ -335,20 +427,16 @@ def simulate_turn_transition(
                 if not is_blocked:
                     user_side = s.p1 if player == "p1" else s.p2
                     user_side.hazards.clear()
-                    if m_id == "mortalspin":
-                        if PokemonType.POISON not in defender.active_types and PokemonType.STEEL not in defender.active_types and def_ab != "goodasgold":
-                            defender.status = StatusCondition.POISON
-                elif m_id == "tidyup":
-                    attacker.boosts["atk"] = min(6, attacker.boosts.get("atk", 0) + 1)
-                    attacker.boosts["spe"] = min(6, attacker.boosts.get("spe", 0) + 1)
             elif m_id == "courtchange":
                 s.p1.hazards, s.p2.hazards = s.p2.hazards, s.p1.hazards
-            elif m_id == "icespinner":
+                s.p1.screens, s.p2.screens = s.p2.screens, s.p1.screens
+                s.p1.tailwind, s.p2.tailwind = s.p2.tailwind, s.p1.tailwind
+            elif m_id == "icespinner" and actual_dmg > 0:
                 s.terrain = Terrain.NONE
-            elif m_id == "ceaselessedge":
+            elif m_id == "ceaselessedge" and actual_dmg > 0:
                 opp_side = s.p2 if player == "p1" else s.p1
                 opp_side.hazards[Hazard.SPIKES_1] = min(3, opp_side.hazards.get(Hazard.SPIKES_1, 0) + 1)
-            elif m_id == "stoneaxe":
+            elif m_id == "stoneaxe" and actual_dmg > 0:
                 opp_side = s.p2 if player == "p1" else s.p1
                 opp_side.hazards[Hazard.STEALTH_ROCK] = 1
             elif m_id == "stealthrock":
@@ -360,13 +448,14 @@ def simulate_turn_transition(
             elif m_id == "defog":
                 s.p1.hazards.clear()
                 s.p2.hazards.clear()
+                (s.p2 if player=="p1" else s.p1).screens.clear()
+                s.terrain = Terrain.NONE
+                s.terrain_turns = 0
             elif m_id in ("uturn", "voltswitch", "flipturn"):
                 user_side = s.p1 if player == "p1" else s.p2
                 succ_rate = getattr(defender, "protect_success_rate", 0.0)
                 # If Protect / Spiky Shield succeeded, pivot move is blocked and DOES NOT switch!
-                if succ_rate <= 0.5 and not attacker.is_fainted:
-                    if clean_key(attacker.ability) == "regenerator":
-                        attacker.heal(max(1, attacker.max_hp // 3))
+                if succ_rate <= 0.5 and actual_dmg > 0 and not attacker.is_fainted:
                     switches = user_side.available_switches()
                     if switches:
                         best_sw = switches[0]
@@ -384,6 +473,7 @@ def simulate_turn_transition(
                                 best_score = score
                                 best_sw = sw_idx
 
+                        reset_on_switch(attacker)
                         user_side.active_index = best_sw
                         apply_entry_hazards(s, side_idx=1 if player == "p1" else 2, mon_idx=best_sw)
                         if player == "p1":
@@ -391,40 +481,42 @@ def simulate_turn_transition(
                         else:
                             p2_active = s.p2.active_pokemon
             elif m_id in ("whirlwind", "roar", "dragontail", "circlethrow"):
-                if m_id in ("whirlwind", "roar") and def_ab == "goodasgold":
+                if (move.category != MoveCategory.STATUS and actual_dmg == 0) or defender.is_fainted or def_ab == "suctioncups":
+                    pass
+                elif m_id in ("whirlwind", "roar") and def_ab == "goodasgold":
                     pass  # Good as Gold is immune to status phazing
                 elif is_magic_bounce and m_id in ("whirlwind", "roar"):
                     # Magic Bounce reflects phazing back to user side
                     u_side = s.p1 if player == "p1" else s.p2
                     u_sw = u_side.available_switches()
                     if u_sw:
-                        u_side.active_index = u_sw[0]
-                        apply_entry_hazards(s, side_idx=1 if player == "p1" else 2, mon_idx=u_sw[0])
+                        reset_on_switch(attacker)
+                        u_side.active_index = rng.choice(u_sw) if sample_outcomes else u_sw[0]
+                        apply_entry_hazards(s, side_idx=1 if player == "p1" else 2, mon_idx=u_side.active_index)
                         if player == "p1":
                             p1_active = s.p1.active_pokemon
                         else:
                             p2_active = s.p2.active_pokemon
                 else:
                     opp_side = s.p2 if player == "p1" else s.p1
-                    if defender:
-                        defender.boosts = {k: 0 for k in defender.boosts}
                     opp_sw = opp_side.available_switches()
                     if opp_sw:
-                        opp_target = opp_sw[0]
+                        opp_target = rng.choice(opp_sw) if sample_outcomes else opp_sw[0]
+                        reset_on_switch(defender)
                         opp_side.active_index = opp_target
                         apply_entry_hazards(s, side_idx=2 if player == "p1" else 1, mon_idx=opp_target)
                         if player == "p1":
                             p2_active = s.p2.active_pokemon
                         else:
                             p1_active = s.p1.active_pokemon
-            elif (getattr(move, "is_heal", False) and move.category == MoveCategory.STATUS) or m_id in ("recover", "roost", "slackoff", "softboiled", "wish", "synthesis", "moonlight", "morningsun", "shoreup", "milkdrink", "healorder"):
+            elif (getattr(move, "is_heal", False) and move.category == MoveCategory.STATUS and m_id != "rest") or m_id in ("recover", "roost", "slackoff", "softboiled", "wish", "synthesis", "moonlight", "morningsun", "shoreup", "milkdrink", "healorder"):
                 if attacker.current_hp < attacker.max_hp:
                     attacker.heal(attacker.max_hp // 2)
             elif m_id == "rest":
                 if attacker.current_hp < attacker.max_hp and attacker.status != StatusCondition.SLEEP:
                     attacker.heal(attacker.max_hp)
                     attacker.status = StatusCondition.SLEEP
-                    attacker.status_turns = 2
+                    attacker.status_turns = 3
             elif m_id == "willowisp":
                 target_mon = attacker if is_magic_bounce else defender
                 t_ab = clean_key(target_mon.ability)
@@ -443,6 +535,9 @@ def simulate_turn_transition(
 
             moved_players.add(player)
 
+    if s.is_game_over:
+        return s  # Showdown ends immediately; no residual damage/healing or duration tick.
+
     # Phase 4: End-of-turn effects (Leftovers, Black Sludge, Poison Heal, Status Orbs, Burn, Poison)
     for act_mon in (s.p1.active_pokemon, s.p2.active_pokemon):
         if act_mon and not act_mon.is_fainted:
@@ -460,22 +555,32 @@ def simulate_turn_transition(
                 else:
                     act_mon.take_damage(max(1, act_mon.max_hp // 8))
 
+            # Poison / Toxic (with Poison Heal support)
+            if act_mon.status in (StatusCondition.POISON, StatusCondition.TOXIC):
+                if ab == "poisonheal":
+                    act_mon.heal(max(1, act_mon.max_hp // 8))
+                elif ab != "magicguard":
+                    if act_mon.status == StatusCondition.TOXIC:
+                        act_mon.toxic_counter = min(15,getattr(act_mon,"toxic_counter",0)+1)
+                        act_mon.take_damage(max(1, act_mon.max_hp // 16)*act_mon.toxic_counter)
+                    else:
+                        act_mon.take_damage(max(1, act_mon.max_hp // 8))
+            elif act_mon.status == StatusCondition.BURN and ab != "magicguard":
+                act_mon.take_damage(max(1, act_mon.max_hp // 16))
+
             # Status Orbs
-            if act_mon.status == StatusCondition.NONE:
+            if not act_mon.is_fainted and act_mon.status == StatusCondition.NONE:
                 if it == "flameorb" and PokemonType.FIRE not in act_mon.active_types:
                     act_mon.status = StatusCondition.BURN
                 elif it == "toxicorb" and PokemonType.POISON not in act_mon.active_types and PokemonType.STEEL not in act_mon.active_types:
                     act_mon.status = StatusCondition.TOXIC
 
-            # Poison / Toxic (with Poison Heal support)
-            if act_mon.status in (StatusCondition.POISON, StatusCondition.TOXIC):
-                if ab == "poisonheal":
-                    act_mon.heal(max(1, act_mon.max_hp // 8))
-                else:
-                    act_mon.take_damage(max(1, act_mon.max_hp // 8))
-            elif act_mon.status == StatusCondition.BURN:
-                act_mon.take_damage(max(1, act_mon.max_hp // 16))
 
+
+    for side in (s.p1,s.p2):
+        side.tailwind = max(0,side.tailwind-1)
+        side.screens = {name:(turns-1 if turns>0 else turns) for name,turns in side.screens.items() if turns != 1}
+    s.trick_room = max(0,s.trick_room-1)
     s.turn += 1
 
     # Auto-switch fainted active Pokémon so subsequent turn evaluations are clean
@@ -666,13 +771,13 @@ class SubgameResolver:
         p1_has_lethal = False
         p1_has_faster_lethal = False
         if p1_mon_before and p2_mon_before and not p1_mon_before.is_fainted and not p2_mon_before.is_fainted:
-            spe1 = p1_mon_before.effective_stat("spe")
-            spe2 = p2_mon_before.effective_stat("spe")
+            spe1 = speed_order_key(p1_mon_before, state.p1, state)
+            spe2 = speed_order_key(p2_mon_before, state.p2, state)
             for a in p1_actions:
                 if a.action_type == ActionType.MOVE:
                     mv = next((x for x in p1_mon_before.moves if getattr(x, "id", "") == a.move_id), None)
                     if mv and mv.category in (MoveCategory.PHYSICAL, MoveCategory.SPECIAL):
-                        rolls = calculate_damage_rolls(p1_mon_before, p2_mon_before, mv, state.weather, state.terrain, attacker_side=state.p1)
+                        rolls = calculate_damage_rolls(p1_mon_before, p2_mon_before, mv, state.weather, state.terrain, attacker_side=state.p1, defender_side=state.p2)
                         if rolls and rolls[0] >= p2_mon_before.current_hp:
                             p1_has_lethal = True
                             if mv.priority > 0 or spe1 > spe2:
@@ -684,13 +789,13 @@ class SubgameResolver:
         p2_has_2hko = False
         p2_has_super_effective = False
         if p1_mon_before and p2_mon_before and not p1_mon_before.is_fainted and not p2_mon_before.is_fainted:
-            spe1 = p1_mon_before.effective_stat("spe")
-            spe2 = p2_mon_before.effective_stat("spe")
+            spe1 = speed_order_key(p1_mon_before, state.p1, state)
+            spe2 = speed_order_key(p2_mon_before, state.p2, state)
             for a in p2_actions:
                 if a.action_type == ActionType.MOVE:
                     mv = next((x for x in p2_mon_before.moves if getattr(x, "id", "") == a.move_id), None)
                     if mv and mv.category in (MoveCategory.PHYSICAL, MoveCategory.SPECIAL):
-                        rolls = calculate_damage_rolls(p2_mon_before, p1_mon_before, mv, state.weather, state.terrain, attacker_side=state.p2)
+                        rolls = calculate_damage_rolls(p2_mon_before, p1_mon_before, mv, state.weather, state.terrain, attacker_side=state.p2, defender_side=state.p1)
                         if rolls:
                             if rolls[0] >= p1_mon_before.current_hp:
                                 p2_has_lethal = True
@@ -711,7 +816,7 @@ class SubgameResolver:
             p1_max_dd = 0
             for dm in p1_mon_before.moves:
                 if dm.category in (MoveCategory.PHYSICAL, MoveCategory.SPECIAL) and clean_key(dm.id) not in ("ruination", "superfang", "seismictoss", "nightshade"):
-                    d_rolls = calculate_damage_rolls(p1_mon_before, p2_mon_before, dm, state.weather, state.terrain, attacker_side=state.p1)
+                    d_rolls = calculate_damage_rolls(p1_mon_before, p2_mon_before, dm, state.weather, state.terrain, attacker_side=state.p1, defender_side=state.p2)
                     if d_rolls and max(d_rolls) > p1_max_dd:
                         p1_max_dd = max(d_rolls)
             p1_has_zero_direct_dmg = (p1_max_dd == 0)
@@ -744,13 +849,13 @@ class SubgameResolver:
                 # Evaluate faster lethal against this specific column's defender
                 col_p1_faster_lethal = False
                 if p1_mon_before and col_def_mon and not p1_mon_before.is_fainted and not col_def_mon.is_fainted:
-                    spe1 = p1_mon_before.effective_stat("spe")
-                    spe_col = col_def_mon.effective_stat("spe")
+                    spe1 = speed_order_key(p1_mon_before, state.p1, state)
+                    spe_col = speed_order_key(col_def_mon, state.p2, state)
                     for ca in p1_actions:
                         if ca.action_type == ActionType.MOVE:
                             cmv = next((x for x in p1_mon_before.moves if getattr(x, "id", "") == ca.move_id), None)
                             if cmv and cmv.category in (MoveCategory.PHYSICAL, MoveCategory.SPECIAL):
-                                crolls = calculate_damage_rolls(p1_mon_before, col_def_mon, cmv, state.weather, state.terrain, attacker_side=state.p1)
+                                crolls = calculate_damage_rolls(p1_mon_before, col_def_mon, cmv, state.weather, state.terrain, attacker_side=state.p1, defender_side=state.p2)
                                 if crolls and crolls[0] >= col_def_mon.current_hp:
                                     if cmv.priority > 0 or spe1 > spe_col:
                                         col_p1_faster_lethal = True
@@ -819,7 +924,7 @@ class SubgameResolver:
                     if a1.action_type == ActionType.MOVE:
                         m1_obj = next((x for x in p1_mon_before.moves if getattr(x, "id", "") == a1.move_id), None)
                         if m1_obj and m1_obj.category in (MoveCategory.PHYSICAL, MoveCategory.SPECIAL):
-                            rolls = calculate_damage_rolls(p1_mon_before, col_def_mon, m1_obj, state.weather, state.terrain, attacker_side=state.p1)
+                            rolls = calculate_damage_rolls(p1_mon_before, col_def_mon, m1_obj, state.weather, state.terrain, attacker_side=state.p1, defender_side=state.p2)
                             if rolls and min(rolls) < col_def_mon.current_hp:
                                 M[i, j] -= 5.00  # Forfeiting a guaranteed immediate KO to click a non-lethal move is strictly dominated!
                             elif rolls and min(rolls) >= col_def_mon.current_hp:
@@ -844,7 +949,7 @@ class SubgameResolver:
                     if is_choice_debuffed:
                         m1_obj = next((x for x in p1_mon_before.moves if getattr(x, "id", "") == a1.move_id), None)
                         if m1_obj:
-                            rolls = calculate_damage_rolls(p1_mon_before, col_def_mon, m1_obj, state.weather, state.terrain, attacker_side=state.p1)
+                            rolls = calculate_damage_rolls(p1_mon_before, col_def_mon, m1_obj, state.weather, state.terrain, attacker_side=state.p1, defender_side=state.p2)
                             if not rolls or min(rolls) < col_def_mon.current_hp:
                                 M[i, j] -= 6.00  # Continuing to attack at -2/-4/-6 SpA without KO is strictly penalized!
 
@@ -852,7 +957,7 @@ class SubgameResolver:
                         # Threatened mon facing faster lethal cannot kill opponent: do NOT throw it away for futile move
                         m1_obj = next((x for x in p1_mon_before.moves if getattr(x, "id", "") == a1.move_id), None)
                         if m1_obj:
-                            rolls = calculate_damage_rolls(p1_mon_before, col_def_mon, m1_obj, state.weather, state.terrain, attacker_side=state.p1)
+                            rolls = calculate_damage_rolls(p1_mon_before, col_def_mon, m1_obj, state.weather, state.terrain, attacker_side=state.p1, defender_side=state.p2)
                             if not rolls or min(rolls) < col_def_mon.current_hp or (p2_has_faster_lethal and m1_obj.priority <= 0):
                                 M[i, j] -= 4.00  # Sacrificing threatened mon when a counter-switch is available is strictly dominated!
                     elif m1_clean in ("makeitrain", "dracometeor", "overheat", "leafstorm", "superpower", "fleurcannon"):
@@ -940,7 +1045,7 @@ class SubgameResolver:
                 if a1.action_type == ActionType.MOVE and p1_mon_before and col_def_mon:
                     m1_obj = next((x for x in p1_mon_before.moves if getattr(x, "id", "") == a1.move_id), None)
                     if m1_obj and m1_obj.category in (MoveCategory.PHYSICAL, MoveCategory.SPECIAL):
-                        rolls = calculate_damage_rolls(p1_mon_before, col_def_mon, m1_obj, state.weather, state.terrain, attacker_side=state.p1)
+                        rolls = calculate_damage_rolls(p1_mon_before, col_def_mon, m1_obj, state.weather, state.terrain, attacker_side=state.p1, defender_side=state.p2)
                         if rolls and max(rolls) == 0:
                             if a2.action_type == ActionType.MOVE:
                                 M[i, j] -= 10.00  # Strictly dominated: attack into known active immunity
@@ -1170,7 +1275,7 @@ class SubgameResolver:
                     elif a2.action_type == ActionType.MOVE:
                         m2_mv = next((x for x in p2_mon_before.moves if getattr(x, "id", "") == a2.move_id), None)
                         if m2_mv and m2_mv.category in (MoveCategory.PHYSICAL, MoveCategory.SPECIAL):
-                            rolls = calculate_damage_rolls(p2_mon_before, p1_mon_before, m2_mv, state.weather, state.terrain, attacker_side=state.p2)
+                            rolls = calculate_damage_rolls(p2_mon_before, p1_mon_before, m2_mv, state.weather, state.terrain, attacker_side=state.p2, defender_side=state.p1)
                             if rolls and min(rolls) >= p1_mon_before.current_hp:
                                 p2_lethal_to_p1 = True
                     if p2_lethal_to_p1:
@@ -1194,7 +1299,7 @@ class SubgameResolver:
                     elif a1.action_type == ActionType.MOVE:
                         m1_mv = next((x for x in p1_mon_before.moves if getattr(x, "id", "") == a1.move_id), None)
                         if m1_mv and m1_mv.category in (MoveCategory.PHYSICAL, MoveCategory.SPECIAL):
-                            rolls = calculate_damage_rolls(p1_mon_before, p2_mon_before, m1_mv, state.weather, state.terrain, attacker_side=state.p1)
+                            rolls = calculate_damage_rolls(p1_mon_before, p2_mon_before, m1_mv, state.weather, state.terrain, attacker_side=state.p1, defender_side=state.p2)
                             if rolls and min(rolls) >= p2_mon_before.current_hp:
                                 p1_lethal_to_p2 = True
                     if p1_lethal_to_p2:
@@ -1242,7 +1347,7 @@ class SubgameResolver:
                     sp1_mv = next((x for x in p1_mon_before.moves if getattr(x, "id", "") == "suckerpunch"), None) if p1_mon_before else None
                     sp1_is_lethal = False
                     if sp1_mv and p2_mon_before:
-                        sp1_rolls = calculate_damage_rolls(p1_mon_before, p2_mon_before, sp1_mv, state.weather, state.terrain, attacker_side=state.p1)
+                        sp1_rolls = calculate_damage_rolls(p1_mon_before, p2_mon_before, sp1_mv, state.weather, state.terrain, attacker_side=state.p1, defender_side=state.p2)
                         if sp1_rolls and min(sp1_rolls) >= p2_mon_before.current_hp:
                             sp1_is_lethal = True
 
@@ -1290,7 +1395,7 @@ class SubgameResolver:
                     sp2_mv = next((x for x in p2_mon_before.moves if getattr(x, "id", "") == "suckerpunch"), None) if p2_mon_before else None
                     sp2_is_lethal = False
                     if sp2_mv and p1_mon_before:
-                        sp2_rolls = calculate_damage_rolls(p2_mon_before, p1_mon_before, sp2_mv, state.weather, state.terrain, attacker_side=state.p2)
+                        sp2_rolls = calculate_damage_rolls(p2_mon_before, p1_mon_before, sp2_mv, state.weather, state.terrain, attacker_side=state.p2, defender_side=state.p1)
                         if sp2_rolls and min(sp2_rolls) >= p1_mon_before.current_hp:
                             sp2_is_lethal = True
 

@@ -186,7 +186,7 @@ class AlphaZeroTrainer:
 
     def _data_contract(self):
         contract = dict(rollout_mode=self.rollout_mode, depth=self.depth, max_turns=self.max_turns,
-                        value_target="terminal_only", observation_version="live_public_v2")
+                        value_target="terminal_only", observation_version="public_field_v3")
         root = Path(__file__).resolve().parents[1]
         contract["encoder_sha256"] = hashlib.sha256((root/'models/embeddings.py').read_bytes()).hexdigest()
         if self.rollout_backend == "showdown":
@@ -208,7 +208,7 @@ class AlphaZeroTrainer:
         if source is None:
             print("No checkpoint found: using the newly initialized model.")
             return
-        self.model.load_state_dict(torch.load(source, map_location=self.device, weights_only=True))
+        self.model.load_compatible_state_dict(torch.load(source, map_location=self.device, weights_only=True))
         print(f"Loaded model weights from {source}")
         if source != self.latest_ckpt:
             print("New experiment: original training counters are not copied.")
@@ -429,6 +429,9 @@ class AlphaZeroTrainer:
         return wins / max(1, num_games)
 
     def train(self, games_to_play: int = 1000, save_every: int = 10, eval_every: int = 0):
+        alignment = Path(__file__).resolve().parents[2] / "docs/ALIGNMENT_STATUS.json"
+        if not alignment.exists() or not json.loads(alignment.read_text()).get("training_allowed",False):
+            raise RuntimeError("Training paused pending environment alignment; see docs/ALIGNMENT_STATUS.json")
         target_games = self.total_games + games_to_play
         print("=" * 75)
         print("  GLAUBERMON MAX: ALPHAZERO SELF-PLAY REINFORCEMENT LEARNING")

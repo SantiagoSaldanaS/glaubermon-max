@@ -1,3 +1,5 @@
+> Prioridad actual (11 de septiembre): **alinear los entornos antes de reentrenar**. El entrenamiento está pausado por código. Ver [estado de alineación](alignment/ESTADO.md). Los pilotos descritos debajo son anteriores a esta pausa.
+
 # Estado actual: correcciones, entrenamiento oficial y piloto externo
 
 Actualizado: 11 de septiembre de 2026. Rama `codex/simulator-training-corrections`.

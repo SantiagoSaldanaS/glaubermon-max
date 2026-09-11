@@ -83,9 +83,9 @@ class GlaubermonMaxNet(nn.Module):
         self.cross_attn1 = CrossAttentionBlock(d_model, nhead=nhead, dim_feedforward=d_model * 2)
         self.cross_attn2 = CrossAttentionBlock(d_model, nhead=nhead, dim_feedforward=d_model * 2)
 
-        # 5. Field Encoder: 16 -> d_model
+        # 5. Field Encoder: 40 public features -> d_model
         self.field_fc = nn.Sequential(
-            nn.Linear(16, d_model),
+            nn.Linear(40, d_model),
             nn.GELU(),
             nn.Linear(d_model, d_model),
             nn.LayerNorm(d_model)
@@ -115,6 +115,18 @@ class GlaubermonMaxNet(nn.Module):
             nn.GELU(),
             nn.Linear(128, num_actions)
         )
+
+    def load_compatible_state_dict(self, weights):
+        """Import a legacy field encoder with zero weights on added public inputs.
+
+        Original checkpoint bytes stay unchanged. No fabricated knowledge is added;
+        only future training can learn to use these new neural features.
+        """
+        weights = dict(weights)
+        old = weights.get("field_fc.0.weight")
+        if old is not None and old.shape[1] == 16:
+            weights["field_fc.0.weight"] = torch.nn.functional.pad(old,(0,24))
+        return self.load_state_dict(weights)
 
     def _encode_team(self, moves_t: torch.Tensor, stats_t: torch.Tensor) -> torch.Tensor:
         # moves_t: (batch, 6, 4, MOVE_DIM)
@@ -172,6 +184,8 @@ class GlaubermonMaxNet(nn.Module):
         p2_pooled = torch.mean(p2_attended, dim=1)  # (batch, d_model)
 
         # 4. Field conditions
+        if field.shape[-1] == 16:  # Explicit legacy input, missing public fields.
+            field = torch.nn.functional.pad(field, (0,24))
         field_emb = self.field_fc(field)  # (batch, d_model)
 
         # 5. Global state fusion

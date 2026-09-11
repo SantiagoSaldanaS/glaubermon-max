@@ -204,7 +204,7 @@ class ShowdownBot:
         if model is not None:
             self.model.eval()
         elif checkpoint and os.path.exists(checkpoint):
-            self.model.load_state_dict(torch.load(checkpoint, map_location=self.device))
+            self.model.load_compatible_state_dict(torch.load(checkpoint, map_location=self.device))
             logger.info(f"Loaded AlphaZero/ReBeL weights from {checkpoint}")
             ckpt_loaded = True
         else:
@@ -250,11 +250,15 @@ class ShowdownBot:
         self.side_hazards: Dict[str, Dict[str, Dict[Hazard, int]]] = {}   # room -> side_tag -> {hazard: count}
         self.mon_status: Dict[str, Dict[str, StatusCondition]] = {}       # room -> species -> status
         self.protect_streaks: Dict[str, Dict[str, int]] = {}              # room -> species -> streak count
-        self.active_booster: Dict[str, Dict[str, str]] = {}               # room -> species -> boosted_stat ("atk", "spe", etc.)
+        self.active_booster: Dict[str, Dict[tuple, str]] = {}  # room -> (side, species) -> stat
         self.room_weather: Dict[str, Weather] = {}                         # room -> Weather enum
         self.room_terrain: Dict[str, Terrain] = {}                         # room -> Terrain enum
         self.last_rqid: Dict[str, int] = {}
         self.room_turn: Dict[str, int] = {}
+        self.public_fields = {}
+        self.active_species_by_side = {}
+        self.revealed_items = {}
+        self.revealed_abilities = {}
         self.active_rooms: set = set()
 
     def get_current_packed_team(self) -> str:
@@ -325,6 +329,9 @@ class ShowdownBot:
                 continue
 
             command = parts[1]
+            if room:
+                from glaubermon.client.field_tracker import PublicFieldTracker
+                self.public_fields.setdefault(room, PublicFieldTracker()).ingest(parts)
 
             # 1. Handle Login Challenge String
             if command == "challstr":
@@ -431,6 +438,17 @@ class ShowdownBot:
                     except json.JSONDecodeError:
                         pass
 
+            if room and len(parts)>3 and command == "-ability":
+                ident = parts[2]
+                spec = self.ident_to_species.get(room,{}).get(ident,ident.split(":")[-1].strip())
+                self.revealed_abilities.setdefault(room,{})[(ident[:2],spec)] = clean_key(parts[3])
+            if room and any(p.startswith("[from] ability: ") for p in parts):
+                ident = next((p.removeprefix("[of] ") for p in parts if p.startswith("[of] ")), parts[2])
+                if ident.startswith(("p1", "p2")):
+                    spec = self.ident_to_species.get(room,{}).get(ident,ident.split(":")[-1].strip())
+                    ability = next(p.split("ability: ",1)[1] for p in parts if p.startswith("[from] ability: "))
+                    self.revealed_abilities.setdefault(room,{})[(ident[:2],spec)] = clean_key(ability)
+
             # Forward to LogDeducer
             try:
                 self.deducer.parse_line(line)
@@ -459,13 +477,12 @@ class ShowdownBot:
 
                 if room not in self.ident_to_species:
                     self.ident_to_species[room] = {}
-                old_mon = self.ident_to_species[room].get(ident)
-                if old_mon:
-                    # Showdown resets boosts upon switching
-                    if room in self.opp_boosts and old_mon in self.opp_boosts[room]:
-                        self.opp_boosts[room][old_mon] = {}
-                    if room in self.our_boosts and old_mon in self.our_boosts[room]:
-                        self.our_boosts[room][old_mon] = {}
+                previous = self.active_species_by_side.setdefault(room,{}).get(side_tag)
+                self.active_species_by_side[room][side_tag] = mon_name
+                boosts_store = self.our_boosts if side_tag==self.our_side.get(room,"p1") else self.opp_boosts
+                for species in (previous,mon_name):
+                    if species:
+                        boosts_store.setdefault(room,{})[species] = {}
                 if room in self.protect_streaks and side_tag in self.protect_streaks[room]:
                     for k in self.protect_streaks[room][side_tag]:
                         self.protect_streaks[room][side_tag][k] = 0
@@ -634,10 +651,8 @@ class ShowdownBot:
             elif room and command in ("-clearboost",) and len(parts) > 2:
                 ident = parts[2].strip()
                 spec = self.ident_to_species.get(room, {}).get(ident, ident.split(":")[-1].strip())
-                if room in self.opp_boosts and spec in self.opp_boosts[room]:
-                    self.opp_boosts[room][spec] = {}
-                if room in self.our_boosts and spec in self.our_boosts[room]:
-                    self.our_boosts[room][spec] = {}
+                store = self.our_boosts if ident[:2]==self.our_side.get(room,"p1") else self.opp_boosts
+                store.setdefault(room,{})[spec] = {}
 
             elif room and command == "-sidestart" and len(parts) > 3:
                 side_ident = parts[2].strip()
@@ -684,18 +699,24 @@ class ShowdownBot:
                 cond = st_map.get(st_str, StatusCondition.NONE)
                 if room not in self.mon_status:
                     self.mon_status[room] = {}
-                self.mon_status[room][spec] = cond
+                self.mon_status[room][(ident[:2],spec)] = cond
                 logger.info(f"[{room}] Status applied to {spec}: {cond.name}")
 
             elif room and command == "-curestatus" and len(parts) > 2:
                 ident = parts[2].strip()
                 spec = self.ident_to_species.get(room, {}).get(ident, ident.split(":")[-1].strip())
                 if room in self.mon_status:
-                    self.mon_status[room][spec] = StatusCondition.NONE
+                    self.mon_status[room][(ident[:2],spec)] = StatusCondition.NONE
 
             elif room and command in ("-enditem", "-item") and len(parts) > 3:
                 ident = parts[2].strip()
                 item_name = parts[3].strip().lower()
+                spec = self.ident_to_species.get(room,{}).get(ident,ident.split(":")[-1].strip())
+                self.revealed_items.setdefault(room,{})[(ident[:2],spec)] = item_name if command == "-item" else None
+                if command == "-item":
+                    for store in (self.p1_popped_items,self.opp_popped_items):
+                        for key in (spec,normalize_species_key(spec),clean_key(spec)):
+                            store.get(room,set()).discard(key)
                 side_tag = ident[:2]
                 our_side = self.our_side.get(room)
                 if our_side and side_tag == our_side:
@@ -725,7 +746,7 @@ class ShowdownBot:
                         if s_name in effect:
                             if room not in self.active_booster:
                                 self.active_booster[room] = {}
-                            self.active_booster[room][spec] = s_name
+                            self.active_booster[room][(ident[:2], spec)] = s_name
                             logger.info(f"[{room}] Booster Volatile Active on {spec}: {s_name.upper()} boosted!")
                             break
 
@@ -734,24 +755,16 @@ class ShowdownBot:
                 effect = parts[3].strip().lower()
                 spec = clean_species_name(self.ident_to_species.get(room, {}).get(ident, ident.split(":")[-1].strip()))
                 if "protosynthesis" in effect or "quarkdrive" in effect:
-                    if room in self.active_booster and spec in self.active_booster[room]:
-                        del self.active_booster[room][spec]
+                    if room in self.active_booster and (ident[:2], spec) in self.active_booster[room]:
+                        del self.active_booster[room][(ident[:2], spec)]
                         logger.info(f"[{room}] Booster Volatile Expired on {spec}")
 
             elif room and command == "-weather" and len(parts) > 2:
                 w_str = parts[2].strip().lower()
-                if "none" in w_str:
-                    w_enum = Weather.NONE
-                elif "sun" in w_str:
-                    w_enum = Weather.SUN
-                elif "rain" in w_str:
-                    w_enum = Weather.RAIN
-                elif "sand" in w_str:
-                    w_enum = Weather.SANDSTORM
-                elif "snow" in w_str or "hail" in w_str:
-                    w_enum = Weather.SNOW
-                else:
-                    w_enum = Weather.NONE
+                w_enum = {"none":Weather.NONE,"sunnyday":Weather.SUN,"raindance":Weather.RAIN,
+                          "sandstorm":Weather.SANDSTORM,"snow":Weather.SNOW,"hail":Weather.SNOW,
+                          "desolateland":Weather.HARSH_SUN,"primordialsea":Weather.HEAVY_RAIN,
+                          "deltastream":Weather.STRONG_WINDS}.get(w_str,Weather.NONE)
                 self.room_weather[room] = w_enum
                 logger.info(f"[{room}] Weather updated to: {w_enum.name}")
 
@@ -766,7 +779,7 @@ class ShowdownBot:
                 elif "psychic" in f_str:
                     t_enum = Terrain.PSYCHIC
                 else:
-                    t_enum = Terrain.NONE
+                    continue  # Trick Room and other fields do not clear terrain.
                 self.room_terrain[room] = t_enum
                 logger.info(f"[{room}] Terrain active: {t_enum.name}")
 
@@ -970,7 +983,7 @@ class ShowdownBot:
             if not tera_type:
                 tera_type = t1
 
-            ability = p.get("ability") or (matching[0].ability if matching else self.dex.get_pokemon_ability(spec))
+            ability = p.get("ability") or p.get("baseAbility") or (matching[0].ability if matching else self.dex.get_pokemon_ability(spec))
 
             # Prevent Air Balloon zombie bug: if popped in protocol or empty in request, item is None
             p_item = p.get("item", None)
@@ -988,7 +1001,7 @@ class ShowdownBot:
 
             # Boosts and Status
             boosts = dict(self.our_boosts.get(room, {}).get(spec, {}))
-            status = self.mon_status.get(room, {}).get(spec, StatusCondition.NONE)
+            status = StatusCondition.NONE
             if "brn" in cond:
                 status = StatusCondition.BURN
             elif "par" in cond:
@@ -1024,7 +1037,7 @@ class ShowdownBot:
                 cartridge_stats = dict(calc_stats)
                 cartridge_stats["hp"] = max_hp
 
-            b_stat1 = self.active_booster.get(room, {}).get(clean_species_name(spec))
+            b_stat1 = self.active_booster.get(room, {}).get((self.our_side.get(room, "p1"), clean_species_name(spec)))
             mon = Pokemon(
                 species=spec,
                 types=(t1, t2),
@@ -1078,6 +1091,9 @@ class ShowdownBot:
             opp_popped = self.opp_popped_items.get(room, set())
             if spec in opp_popped or normalize_species_key(spec) in opp_popped or clean_key(spec) in opp_popped:
                 item = None
+            public_item_key = ("p2" if self.our_side.get(room,"p1")=="p1" else "p1",spec)
+            if public_item_key in self.revealed_items.get(room,{}):
+                item = self.revealed_items[room][public_item_key]
             tera_type = meta_mon.tera_type if meta_mon else t1
 
             # Opponent Tera Isolation: ONLY the specific Pokémon that executed Terastallization is Terastallized
@@ -1089,7 +1105,7 @@ class ShowdownBot:
                     tera_type = STRING_TO_TYPE.get(self.opp_tera[room].lower(), tera_type)
 
             # Resolve Opponent Ability
-            ded_ability = self.deducer.get_or_create(spec).revealed_ability
+            ded_ability = self.revealed_abilities.get(room,{}).get(("p2" if self.our_side.get(room,"p1")=="p1" else "p1",spec))
             if ded_ability:
                 ability = ded_ability
             elif meta_mon and meta_mon.ability:
@@ -1126,11 +1142,11 @@ class ShowdownBot:
                 if clean_key(b_k) == clean_key(spec) or clean_key(b_k).split("-")[0] == clean_key(spec).split("-")[0]:
                     boosts = dict(b_v)
                     break
-            status = self.mon_status.get(room, {}).get(spec, StatusCondition.NONE)
+            status = self.mon_status.get(room, {}).get(("p2" if self.our_side.get(room,"p1")=="p1" else "p1",spec), StatusCondition.NONE)
             c_spec2 = normalize_species_key(spec)
             opp_side_tag = "p2" if self.our_side.get(room, "p1") == "p1" else "p1"
             p2_streak = self.protect_streaks.get(room, {}).get(opp_side_tag, {}).get(c_spec2, 0)
-            b_stat2 = self.active_booster.get(room, {}).get(clean_species_name(spec))
+            b_stat2 = self.active_booster.get(room, {}).get((opp_side_tag, clean_species_name(spec)))
 
             mon = Pokemon(
                 species=spec,
@@ -1164,9 +1180,13 @@ class ShowdownBot:
         p1_hazards = dict(self.side_hazards.get(room, {}).get(our_tag, {}))
         p2_hazards = dict(self.side_hazards.get(room, {}).get(opp_tag, {}))
 
-        p1_side = BattleSide(pokemon=p1_mons, active_index=p1_active_idx, hazards=p1_hazards, is_tera_used=p1_tera_used)
+        from glaubermon.client.field_tracker import PublicFieldTracker
+        fields = self.public_fields.get(room, PublicFieldTracker())
+        p1_side = BattleSide(pokemon=p1_mons, active_index=p1_active_idx, hazards=p1_hazards, is_tera_used=p1_tera_used,
+                             screens=dict(fields.screens[our_tag]), tailwind=fields.tailwind[our_tag])
         p2_tera_used = bool(self.opp_tera.get(room))
-        p2_side = BattleSide(pokemon=p2_mons, active_index=p2_active_idx, hazards=p2_hazards, is_tera_used=p2_tera_used)
+        p2_side = BattleSide(pokemon=p2_mons, active_index=p2_active_idx, hazards=p2_hazards, is_tera_used=p2_tera_used,
+                             screens=dict(fields.screens[opp_tag]), tailwind=fields.tailwind[opp_tag])
 
         if p1_side.active_pokemon:
             act_k = normalize_species_key(p1_side.active_pokemon.species)
@@ -1177,7 +1197,8 @@ class ShowdownBot:
 
         weather = self.room_weather.get(room, Weather.NONE)
         terrain = self.room_terrain.get(room, Terrain.NONE)
-        return BattleState(p1=p1_side, p2=p2_side, weather=weather, terrain=terrain, turn=self.room_turn.get(room, 1))
+        return BattleState(p1=p1_side, p2=p2_side, weather=weather, terrain=terrain, turn=self.room_turn.get(room, 1), trick_room=fields.trick_room,
+                           weather_turns=-1 if weather != Weather.NONE else 0, terrain_turns=-1 if terrain != Terrain.NONE else 0)
 
     def select_lead_order(self, room: str, req: Optional[Dict] = None) -> str:
         """Dynamically evaluate opponent team preview to select the optimal starting lead.

@@ -86,12 +86,12 @@ def test_showdown_dex_canonical_attributes():
 
     # Rapid Spin (self +1 Spe)
     rs = dex.get_move("rapidspin")
-    assert rs.self_boosts == {"spe": 1}
+    assert any(sec.get("self",{}).get("boosts")=={"spe":1} for sec in rs.secondaries)
     assert rs.is_contact is True
 
     # Chilling Water (target -1 Atk)
     cw = dex.get_move("chillingwater")
-    assert cw.boosts == {"atk": -1}
+    assert any(sec.get("boosts")=={"atk":-1} for sec in cw.secondaries)
     assert cw.is_contact is False
 
     # Stealth Rock (reflectable by Magic Bounce)

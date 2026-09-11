@@ -231,16 +231,10 @@ class ShowdownDex:
             self_b.update(sb)
 
         sec_list = []
-        if isinstance(entry.get("secondary"), dict):
-            sec_list.append(entry["secondary"])
         if isinstance(entry.get("secondaries"), list):
             sec_list.extend(entry["secondaries"])
-        for sec in sec_list:
-            if sec.get("chance", 100) == 100:
-                if "boosts" in sec:
-                    target_b.update(sec["boosts"])
-                if "self" in sec and isinstance(sec["self"], dict) and "boosts" in sec["self"]:
-                    self_b.update(sec["self"]["boosts"])
+        elif isinstance(entry.get("secondary"), dict):
+            sec_list.append(entry["secondary"])
 
         return Move(
             id=key,
@@ -267,6 +261,10 @@ class ShowdownDex:
             crit_ratio=entry.get("critRatio", 1),
             will_crit=bool(entry.get("willCrit", False)),
             blocked_by_protect=bool(flags.get("protect", 0)),
+            secondaries=sec_list,
+            defrost=bool(flags.get("defrost")),
+            sleep_usable=bool(entry.get("sleepUsable")),
+            sleep_talk_callable=not (flags.get("nosleeptalk") or flags.get("charge") or entry.get("isZ") or entry.get("isMax")),
         )
 
     def get_move_info(self, move_name: str) -> Tuple[PokemonType, MoveCategory, int, int, int]:

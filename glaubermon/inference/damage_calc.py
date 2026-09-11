@@ -88,11 +88,17 @@ def calculate_damage_rolls(
     terrain: Terrain = Terrain.NONE,
     is_critical: bool = False,
     fallen_allies: int = 0,
-    attacker_side: Optional[Any] = None
+    attacker_side: Optional[Any] = None,
+    defender_side: Optional[Any] = None
 ) -> List[int]:
     """Calculate all 16 discrete damage rolls for a move in Gen 9."""
     m_id = move.id.lower().replace(" ", "").replace("-", "")
 
+    # Fixed damage still respects type immunity.
+    if m_id in ("nightshade","seismictoss","superfang"):
+        t1,t2 = defender.active_types
+        if get_type_effectiveness(move.move_type,t1,t2) == 0:
+            return [0]*16
     # 1. Fixed Damage Moves
     if m_id in ("ruination", "superfang"):
         half_hp = max(1, defender.current_hp // 2)
@@ -348,6 +354,10 @@ def calculate_damage_rolls(
         mod_damage = int(mod_damage * crit_mult)
     # 13. Gen 9 applies the integer random factor BEFORE STAB/type/burn.
     # Moving it past these steps changes the discrete damage support.
+    screen = False
+    if defender_side is not None and not is_critical and atk_ability != "infiltrator":
+        names = ("auroraveil", "reflect" if move.category == MoveCategory.PHYSICAL else "lightscreen")
+        screen = any(defender_side.screens.get(name,0) != 0 for name in names)
     rolls = []
     for percent in range(85, 101):
         final_dmg = mod_damage * percent // 100
@@ -356,6 +366,8 @@ def calculate_damage_rolls(
         final_dmg = int(final_dmg * burn_mult)
         final_dmg = int(final_dmg * ability_mult)
         final_dmg = int(final_dmg * item_mult)
+        if screen:
+            final_dmg //= 2
         rolls.append(max(1, final_dmg))
 
     return rolls
