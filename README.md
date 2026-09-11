@@ -1,3 +1,5 @@
+> Estado de las correcciones y comandos del piloto oficial: [docs/TRAINING_CORRECTIONS.md](docs/TRAINING_CORRECTIONS.md). El entrenamiento actual usa observaciones del cliente y resultados de Showdown; el motor interno sigue siendo experimental. Los checkpoints originales se conservan.
+
 # Glaubermon Max
 
 Glaubermon Max is an expert/superhuman game-theoretic AI for **Pokémon Showdown**.
