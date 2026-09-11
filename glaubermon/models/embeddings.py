@@ -15,8 +15,16 @@ MOVE_DIM = 32
 STAT_DIM = 64
 
 
+_MOVE_ENCODING_CACHE: Dict[Tuple, torch.Tensor] = {}
+
+
 def encode_move(move: Move) -> torch.Tensor:
-    """Encode a single move into a 1D feature vector of size 32."""
+    """Encode a single move into a 1D feature vector of size 32 (with memoization)."""
+    key = (move.base_power, move.accuracy, move.priority, move.pp, move.move_type, move.category)
+    cached = _MOVE_ENCODING_CACHE.get(key)
+    if cached is not None:
+        return cached.clone()
+
     vec = torch.zeros(MOVE_DIM, dtype=torch.float32)
     vec[0] = move.base_power / 200.0
     vec[1] = move.accuracy
@@ -35,7 +43,10 @@ def encode_move(move: Move) -> torch.Tensor:
     elif move.category == MoveCategory.STATUS:
         vec[25] = 1.0
 
-    return vec
+    if len(_MOVE_ENCODING_CACHE) >= 4096:
+        _MOVE_ENCODING_CACHE.clear()
+    _MOVE_ENCODING_CACHE[key] = vec
+    return vec.clone()
 
 
 def encode_pokemon(mon: Optional[Pokemon], is_active: bool = False) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -82,34 +93,70 @@ def encode_pokemon(mon: Optional[Pokemon], is_active: bool = False) -> Tuple[tor
     return moves_tensor, stats_tensor
 
 
-def encode_battle_state(state: BattleState) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Convert entire 6v6 BattleState into model-ready PyTorch tensors.
+def encode_battle_state(state: BattleState) -> Tuple[Tuple[torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
+    """Convert entire 6v6 BattleState into model-ready PyTorch tensors with preallocated buffers.
 
     Returns:
         p1_tensor: Tuple of (moves (6, 4, 32), stats (6, 64))
         p2_tensor: Tuple of (moves (6, 4, 32), stats (6, 64))
         field_tensor: Tensor of shape (16,) containing weather, terrain, hazards
     """
-    p1_moves = []
-    p1_stats = []
+    p1_moves_t = torch.zeros(6, 4, MOVE_DIM, dtype=torch.float32)
+    p1_stats_t = torch.zeros(6, STAT_DIM, dtype=torch.float32)
+    p2_moves_t = torch.zeros(6, 4, MOVE_DIM, dtype=torch.float32)
+    p2_stats_t = torch.zeros(6, STAT_DIM, dtype=torch.float32)
+
     for i in range(6):
         mon = state.p1.pokemon[i] if i < len(state.p1.pokemon) else None
-        m_vec, s_vec = encode_pokemon(mon, is_active=(i == state.p1.active_index))
-        p1_moves.append(m_vec)
-        p1_stats.append(s_vec)
+        if mon and not mon.is_fainted:
+            for j in range(min(4, len(mon.moves))):
+                p1_moves_t[i, j] = encode_move(mon.moves[j])
+            p1_stats_t[i, 1] = mon.hp_percent
+            p1_stats_t[i, 2] = 1.0 if i == state.p1.active_index else 0.0
+            p1_stats_t[i, 3] = 1.0 if mon.is_terastallized else 0.0
+            t1_idx = TYPE_MAP.get(mon.active_types[0], 0)
+            p1_stats_t[i, 4 + (t1_idx % 19)] = 1.0
+            if mon.active_types[1] is not None:
+                t2_idx = TYPE_MAP.get(mon.active_types[1], 0)
+                p1_stats_t[i, 23 + (t2_idx % 19)] = 1.0
+            s_idx = STATUS_MAP.get(mon.status, 0)
+            p1_stats_t[i, 42 + (s_idx % 7)] = 1.0
+            for k_i, k in enumerate(["atk", "def", "spa", "spd", "spe"]):
+                p1_stats_t[i, 49 + k_i] = mon.boosts.get(k, 0) / 6.0
+            if mon.raw_stats:
+                for k_i, k in enumerate(["hp", "atk", "def", "spa", "spd", "spe"]):
+                    val = mon.raw_stats.get(k, 80)
+                    p1_stats_t[i, 54 + k_i] = min(1.0, val / 255.0)
+            else:
+                p1_stats_t[i, 54:60] = 80.0 / 255.0
+        else:
+            p1_stats_t[i, 0] = 1.0
 
-    p2_moves = []
-    p2_stats = []
     for i in range(6):
         mon = state.p2.pokemon[i] if i < len(state.p2.pokemon) else None
-        m_vec, s_vec = encode_pokemon(mon, is_active=(i == state.p2.active_index))
-        p2_moves.append(m_vec)
-        p2_stats.append(s_vec)
-
-    p1_moves_t = torch.stack(p1_moves)  # (6, 4, 32)
-    p1_stats_t = torch.stack(p1_stats)  # (6, 64)
-    p2_moves_t = torch.stack(p2_moves)  # (6, 4, 32)
-    p2_stats_t = torch.stack(p2_stats)  # (6, 64)
+        if mon and not mon.is_fainted:
+            for j in range(min(4, len(mon.moves))):
+                p2_moves_t[i, j] = encode_move(mon.moves[j])
+            p2_stats_t[i, 1] = mon.hp_percent
+            p2_stats_t[i, 2] = 1.0 if i == state.p2.active_index else 0.0
+            p2_stats_t[i, 3] = 1.0 if mon.is_terastallized else 0.0
+            t1_idx = TYPE_MAP.get(mon.active_types[0], 0)
+            p2_stats_t[i, 4 + (t1_idx % 19)] = 1.0
+            if mon.active_types[1] is not None:
+                t2_idx = TYPE_MAP.get(mon.active_types[1], 0)
+                p2_stats_t[i, 23 + (t2_idx % 19)] = 1.0
+            s_idx = STATUS_MAP.get(mon.status, 0)
+            p2_stats_t[i, 42 + (s_idx % 7)] = 1.0
+            for k_i, k in enumerate(["atk", "def", "spa", "spd", "spe"]):
+                p2_stats_t[i, 49 + k_i] = mon.boosts.get(k, 0) / 6.0
+            if mon.raw_stats:
+                for k_i, k in enumerate(["hp", "atk", "def", "spa", "spd", "spe"]):
+                    val = mon.raw_stats.get(k, 80)
+                    p2_stats_t[i, 54 + k_i] = min(1.0, val / 255.0)
+            else:
+                p2_stats_t[i, 54:60] = 80.0 / 255.0
+        else:
+            p2_stats_t[i, 0] = 1.0
 
     field_tensor = torch.zeros(16, dtype=torch.float32)
     w_idx = WEATHER_MAP.get(state.weather, 0)
