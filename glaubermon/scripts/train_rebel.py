@@ -480,7 +480,11 @@ if __name__ == "__main__":
     parser.add_argument("--showdown-path", help="Path to pinned pokemon-showdown npm package")
     parser.add_argument("--max-turns", type=int, default=300)
     parser.add_argument("--depth", type=int, default=1)
+    parser.add_argument("--torch-threads", type=int, default=1, help="CPU threads for small inference batches; recorded in checkpoint metadata")
     args = parser.parse_args()
+    if args.torch_threads < 1:
+        parser.error("--torch-threads must be positive")
+    torch.set_num_threads(args.torch_threads)
 
     trainer = AlphaZeroTrainer(checkpoint_dir=args.checkpoint_dir, reset_from_scratch=args.from_scratch,
                               mechanics_seed=args.mechanics_seed, rollout_backend=args.rollout_backend,
