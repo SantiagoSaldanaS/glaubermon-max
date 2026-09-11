@@ -540,7 +540,7 @@ def simulate_turn_transition(
                     else:
                         other = player if is_magic_bounce else ("p2" if player == "p1" else "p1")
                         # A late Taunt includes three *future* turns after this residual.
-                        target.volatiles.setdefault("taunt", {"duration":4 if is_magic_bounce or other in moved_players else 3})
+                        target.volatiles.setdefault("taunt", {"duration":4 if is_magic_bounce or (other in moved_players and selected_users.get(other) is target) else 3})
             elif move.volatile_status == "confusion":
                 target = attacker if is_magic_bounce else defender
                 if clean_key(target.ability) != "owntempo" and not (target.is_grounded() and s.terrain == Terrain.MISTY):
@@ -553,7 +553,7 @@ def simulate_turn_transition(
                         duration = 8 if clean_key(attacker.item)=="gripclaw" else (rng.randint(5,6) if sample_outcomes else 5)
                         defender.volatiles.setdefault("partiallytrapped", {"duration":duration,"source":source,
                             "divisor":6 if clean_key(attacker.item)=="bindingband" else 8})
-                    elif PokemonType.GHOST not in defender.active_types:
+                    else:
                         target = attacker if is_magic_bounce else defender
                         if PokemonType.GHOST not in target.active_types:
                             if is_magic_bounce:

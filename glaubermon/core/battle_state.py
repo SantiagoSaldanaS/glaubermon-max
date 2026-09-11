@@ -137,6 +137,27 @@ class BattleState:
 
         return actions
 
+    def flipped(self) -> "BattleState":
+        """Change player perspective, including source-bound and queued state."""
+        result = self.clone()
+        result.p1,result.p2 = result.p2,result.p1
+        result.pending_switches = tuple(sorted(3-i for i in result.pending_switches))
+        for side in (result.p1,result.p2):
+            for mon in side.pokemon:
+                for key in ("trapped","partiallytrapped"):
+                    source = mon.volatiles.get(key,{}).get("source")
+                    if source:
+                        mon.volatiles[key]["source"] = (3-source[0],source[1])
+        continuation = result.continuation
+        if continuation:
+            flip = lambda player: "p2" if player == "p1" else "p1"
+            continuation["users"] = {flip(who):index for who,index in continuation["users"].items()}
+            continuation["order"] = [(flip(who),slot,move) for who,slot,move in continuation["order"]]
+            continuation["moved"] = [flip(who) for who in continuation["moved"]]
+            continuation["flinched"] = [flip(who) for who in continuation["flinched"]]
+            continuation["m1"],continuation["m2"] = continuation["m2"],continuation["m1"]
+        return result
+
     def clone(self) -> "BattleState":
         return BattleState(
             p1=self.p1.clone(),

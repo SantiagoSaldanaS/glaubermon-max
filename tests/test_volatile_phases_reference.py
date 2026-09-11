@@ -58,6 +58,9 @@ CASES=[
  dict(name='two_pivots_keep_both_replacement_choices',teams=[[team('Mew',moves=['U-turn']),team('Ludicolo')],[team('Heatran',moves=['Flip Turn'],ability='Shell Armor'),team('Blissey')]],initial=[{'stats':{'atk':1}},{'stats':{'atk':1}}],actions=[['move 1','move 1'],['switch 2',''],['','switch 2']]),
  dict(name='simultaneous_faint_replacements_are_switch_only',teams=[[team(moves=['Tackle'],evs={'spe':252}),team('Blissey')],[team(),team('Chansey')]],initial=[{'hp':1,'pp':[0]},{'hp':1}],actions=[['move 1','move 1'],['switch 2','switch 2']]),
 
+ dict(name='ghost_magic_bounce_reflects_mean_look',teams=[[team(moves=['Mean Look'])],[team('Gengar',ability='Magic Bounce')]]),
+ dict(name='taunt_after_pivot_targets_a_fresh_entrant',teams=[[team('Mew',moves=['U-turn']),team('Blissey')],[team('Heatran',moves=['Taunt'],ability='Shell Armor')]],initial=[{'stats':{'atk':1}},{}],actions=[['move 1','move 1'],['switch 2','']]),
+
 ]
 
 @pytest.fixture(scope='module')
@@ -173,3 +176,17 @@ def test_pending_branches_preserve_queue_and_waiting_player(references):
  action,prob,actions,value=resolver._resolve_replacements(phase,0,False)
  assert action==a and len(actions)==len(prob)==1
  assert phase.continuation and phase.p1.active_index==0
+
+
+def test_perspective_flip_preserves_trap_sources_and_pending_queue(references):
+ state=from_snapshot(references['pivot_resumes_queued_attack_on_incoming']['before'])
+ state.p1.active_pokemon.volatiles['partiallytrapped']={'duration':5,'source':(2,0),'divisor':8}
+ phase=simulate_turn_transition(state,MoveAction('uturn',1),MoveAction('seismictoss',1))
+ flipped=phase.flipped()
+ assert flipped.pending_switches==(2,)
+ assert flipped.p2.active_pokemon.volatiles['partiallytrapped']['source']==(1,0)
+ assert flipped.flipped()==phase
+ from_first=simulate_turn_transition(phase,SwitchAction(2,'Blissey'),None)
+ from_second=simulate_turn_transition(flipped,None,SwitchAction(2,'Blissey')).flipped()
+ assert from_first==from_second
+ assert phase.p1.active_index==0

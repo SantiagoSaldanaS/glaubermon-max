@@ -277,7 +277,7 @@ class AlphaZeroTrainer:
                 side = state.p1 if side_idx == 1 else state.p2
                 active_resolver = opponent_resolver if side_idx == 2 and opponent_resolver is not None else resolver
                 if resolver is None:  # Explicit replacement policy supplied by a test/caller.
-                    view = state if side_idx == 1 else replace(state,p1=state.p2,p2=state.p1)
+                    view = state if side_idx == 1 else state.flipped()
                     slot = execute_showdown_accurate_force_switch(active_resolver,side,view.p2.active_pokemon,view)
                     actions[side_idx-1] = SwitchAction(slot+1,side.pokemon[slot].species)
                 else:
@@ -323,7 +323,7 @@ class AlphaZeroTrainer:
             act1, p1_strat, actions1, _ = self.resolver.resolve_turn(state, depth=self.depth, sample=True)
 
             # Solve for P2 (perspective inverted)
-            inv_state = replace(state, p1=state.p2, p2=state.p1)
+            inv_state = state.flipped()
             act2, _, _, _ = self.resolver.resolve_turn(inv_state, depth=self.depth, sample=True)
 
             # Encode search policy distribution into exact 14-dim action logit targets
@@ -417,7 +417,7 @@ class AlphaZeroTrainer:
                 act1, _, _, _ = neural_resolver.resolve_turn(state, depth=1, sample=False)
 
                 # Baseline heuristic action
-                inv_state = replace(state, p1=state.p2, p2=state.p1)
+                inv_state = state.flipped()
                 p2_acts = inv_state.get_valid_actions(player=1)
                 best_act = p2_acts[0]
                 best_val = -999.0
