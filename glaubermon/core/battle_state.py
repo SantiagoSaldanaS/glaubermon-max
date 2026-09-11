@@ -1,8 +1,9 @@
 """Full 6v6 Battle State Representation."""
 
 from dataclasses import dataclass, field
+from copy import deepcopy
 from typing import Dict, List, Optional
-from glaubermon.core.types import Weather, Terrain, Hazard, ActionType
+from glaubermon.core.types import Weather, Terrain, Hazard, ActionType, MoveCategory, PokemonType
 from glaubermon.core.pokemon import Pokemon
 from glaubermon.core.actions import Action, MoveAction, SwitchAction
 from glaubermon.core.constants import clean_key
@@ -62,6 +63,15 @@ class BattleState:
     terrain_turns: int = 0
     turn: int = 1
     trick_room: int = 0
+    pending_switches: tuple = ()
+    continuation: Optional[dict] = None
+
+    def is_trapped(self, player: int) -> bool:
+        side = self.p1 if player == 1 else self.p2
+        mon = side.active_pokemon
+        if not mon or mon.is_fainted or PokemonType.GHOST in mon.active_types or clean_key(mon.item) == "shedshell":
+            return False
+        return any(key in mon.volatiles for key in ("partiallytrapped", "trapped", "request_trapped"))
 
     @property
     def is_game_over(self) -> bool:
@@ -81,7 +91,9 @@ class BattleState:
         active = side.active_pokemon
         actions: List[Action] = []
 
-        if active is None or active.is_fainted:
+        if self.pending_switches and player not in self.pending_switches:
+            return []  # This player is waiting, not selecting another move.
+        if player in self.pending_switches or active is None or active.is_fainted:
             # Must switch
             for slot in side.available_switches():
                 actions.append(SwitchAction(target_slot=slot + 1, species=side.pokemon[slot].species))
@@ -94,6 +106,8 @@ class BattleState:
 
         for i, move in enumerate(active.moves):
             if move.pp > 0:
+                if "taunt" in active.volatiles and move.category == MoveCategory.STATUS and move.id != "mefirst":
+                    continue
                 if locked_m and clean_key(move.id) != clean_key(locked_m):
                     continue
                 actions.append(MoveAction(
@@ -115,7 +129,7 @@ class BattleState:
             actions.append(MoveAction(move_id="struggle", move_slot=1))
 
         # 2. Switch actions
-        for slot in side.available_switches():
+        for slot in ([] if self.is_trapped(player) else side.available_switches()):
             actions.append(SwitchAction(
                 target_slot=slot + 1,
                 species=side.pokemon[slot].species
@@ -132,5 +146,7 @@ class BattleState:
             terrain=self.terrain,
             terrain_turns=self.terrain_turns,
             turn=self.turn,
-            trick_room=self.trick_room
+            trick_room=self.trick_room,
+            pending_switches=tuple(self.pending_switches),
+            continuation=deepcopy(self.continuation),
         )

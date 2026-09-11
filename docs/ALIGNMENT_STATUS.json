@@ -1,12 +1,12 @@
 {
   "training_allowed": false,
   "reason": "Felipe/Santiago require environment alignment before another training run (2026-09-11).",
-  "feature_schema": "public_field_v3",
+  "feature_schema": "public_volatile_v4",
   "official_reference": "pokemon-showdown@0.11.11",
   "remaining": [
-    "Validate complete pivot/forced-replacement phases and entry abilities",
-    "Model and observe Substitute, Taunt, trapping, confusion and other volatile conditions",
-    "Validate weather/terrain residuals, multi-hit and dynamic-power moves",
+    "Extend oracle coverage to simultaneous entry callbacks and remaining pivot moves (Baton Pass, Shed Tail, Parting Shot, Teleport)",
+    "Model remaining relevant volatiles (Encore, Disable, Leech Seed) and uncertain public timers as beliefs",
+    "Validate weather/terrain residuals and entry setters, speed abilities, multi-hit and dynamic-power moves",
     "Audit remaining item/ability callbacks and modifier rounding",
     "Compare full official trajectories and search-state transitions across current team pools"
   ]

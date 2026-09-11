@@ -39,7 +39,7 @@ from glaubermon.models.set_transformer import GlaubermonMaxNet
 from glaubermon.search.subgame_resolver import SubgameResolver, simulate_turn_transition, apply_entry_hazards
 from glaubermon.search.evaluators import NeuralEvaluator, HeuristicEvaluator, HybridEvaluator
 from glaubermon.scripts.mass_battle_auditor import execute_showdown_accurate_force_switch
-from glaubermon.core.actions import action_to_logit_index
+from glaubermon.core.actions import action_to_logit_index, SwitchAction
 from glaubermon.data.showdown_dex import ShowdownDex
 from glaubermon.data.meta_teams import (
     get_meta_team_balance,
@@ -186,7 +186,7 @@ class AlphaZeroTrainer:
 
     def _data_contract(self):
         contract = dict(rollout_mode=self.rollout_mode, depth=self.depth, max_turns=self.max_turns,
-                        value_target="terminal_only", observation_version="public_field_v3")
+                        value_target="terminal_only", observation_version="public_volatile_v4")
         root = Path(__file__).resolve().parents[1]
         contract["encoder_sha256"] = hashlib.sha256((root/'models/embeddings.py').read_bytes()).hexdigest()
         if self.rollout_backend == "showdown":
@@ -266,17 +266,25 @@ class AlphaZeroTrainer:
         print("Model saved safely. Exiting cleanly.")
         sys.exit(0)
 
-    def _replace_fainted(self, state: BattleState, resolver: SubgameResolver, opponent_resolver=None):
-        """Replacement is a separate phase, including repeated hazard KOs."""
-        for side_idx in (1, 2):
-            view = state if side_idx == 1 else replace(state, p1=state.p2, p2=state.p1)
-            while view.p1.active_pokemon.is_fainted and not view.p1.is_all_fainted:
+    def _replace_fainted(self, state: BattleState, resolver: SubgameResolver, opponent_resolver=None, rng=None):
+        """Resolve every requested replacement and resume any queued turn actions."""
+        if not state.pending_switches:
+            state.pending_switches = tuple(i for i,side in ((1,state.p1),(2,state.p2))
+                if side.active_pokemon.is_fainted and not side.is_all_fainted)
+        while state.pending_switches and not state.is_game_over:
+            actions = [None,None]
+            for side_idx in state.pending_switches:
+                side = state.p1 if side_idx == 1 else state.p2
                 active_resolver = opponent_resolver if side_idx == 2 and opponent_resolver is not None else resolver
-                slot = execute_showdown_accurate_force_switch(active_resolver, view.p1, view.p2.active_pokemon, view)
-                if slot not in view.p1.available_switches():
-                    raise ValueError(f"Invalid forced replacement slot: {slot}")
-                view.p1.active_index = slot
-                apply_entry_hazards(state, side_idx, slot)
+                if resolver is None:  # Explicit replacement policy supplied by a test/caller.
+                    view = state if side_idx == 1 else replace(state,p1=state.p2,p2=state.p1)
+                    slot = execute_showdown_accurate_force_switch(active_resolver,side,view.p2.active_pokemon,view)
+                    actions[side_idx-1] = SwitchAction(slot+1,side.pokemon[slot].species)
+                else:
+                    result = active_resolver.resolve_turn(state,depth=1,sample=True,return_both_players=True)
+                    actions[side_idx-1] = result[0 if side_idx == 1 else 4]
+            after = simulate_turn_transition(state,*actions,sample_outcomes=True,rng=rng)
+            state.__dict__.update(after.__dict__)
 
     def play_self_play_game(self) -> List[Tuple]:
         """Play one full self-play match using SubgameResolver search."""
@@ -330,7 +338,7 @@ class AlphaZeroTrainer:
             state = simulate_turn_transition(state, act1, act2, sample_outcomes=True, rng=rng)
 
             # Force replacement if fainted
-            self._replace_fainted(state, self.resolver)
+            self._replace_fainted(state, self.resolver, rng=rng)
 
         if state.winner == 1:
             outcome = 1.0

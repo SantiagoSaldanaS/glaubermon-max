@@ -1,11 +1,12 @@
 """Differential tests: actual official transitions, not hand-written desired outcomes."""
 import json, random, subprocess
 from pathlib import Path
+from copy import deepcopy
 import pytest
 from glaubermon.core.battle_state import BattleState,BattleSide
 from glaubermon.core.pokemon import Pokemon,Move
 from glaubermon.core.actions import MoveAction,SwitchAction
-from glaubermon.core.types import PokemonType,StatusCondition
+from glaubermon.core.types import PokemonType,StatusCondition,Hazard
 from glaubermon.search.subgame_resolver import simulate_turn_transition
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -36,10 +37,11 @@ for key in ('trick_room','tailwind'):
  CASES.append({'name':key+'_order','teams':[[{'species':'Snorlax','moves':['Seismic Toss']}],[{'species':'Snorlax','moves':['Seismic Toss'],'evs':{'spe':252}}]],
  'initial':[{'hp':100,**({'tailwind':True} if key=='tailwind' else {})},{'hp':100}], 'trick_room':key=='trick_room'})
 
-STATUS={'':StatusCondition.NONE,'slp':StatusCondition.SLEEP,'tox':StatusCondition.TOXIC,'brn':StatusCondition.BURN,'par':StatusCondition.PARALYSIS,'psn':StatusCondition.POISON,'frz':StatusCondition.FREEZE}
+STATUS={'fnt':StatusCondition.NONE,'':StatusCondition.NONE,'slp':StatusCondition.SLEEP,'tox':StatusCondition.TOXIC,'brn':StatusCondition.BURN,'par':StatusCondition.PARALYSIS,'psn':StatusCondition.POISON,'frz':StatusCondition.FREEZE}
 
 def from_snapshot(data):
  sides=[]
+ hazard_keys={"stealthrock":Hazard.STEALTH_ROCK,"spikes":Hazard.SPIKES_1,"toxicspikes":Hazard.TOXIC_SPIKES_1,"stickyweb":Hazard.STICKY_WEB}
  for side in data['sides']:
   mons=[]
   for p in side['mons']:
@@ -48,9 +50,17 @@ def from_snapshot(data):
     move=Move.from_dex(m['id']);move.pp=m['pp'];move.max_pp=m['maxpp'];moves.append(move)
    types=[PokemonType(t) for t in p['types']]
    mons.append(Pokemon(species=p['species'],types=(types[0],types[1] if len(types)>1 else None),current_hp=p['hp'],max_hp=p['maxhp'],
-      raw_stats={'hp':p['maxhp'],**p['stats']},ability=p['ability'],item=p['item'],status=STATUS[p['status']],status_turns=p['time'],boosts=p['boosts'].copy(),moves=moves))
-  sides.append(BattleSide(mons,active_index=side['active'],screens=side['screens'].copy(),tailwind=side['tailwind']))
- return BattleState(*sides,trick_room=data['trick_room'])
+      level=p.get('level',100),volatiles=deepcopy(p.get('volatiles',{})),raw_stats={'hp':p['maxhp'],**p['stats']},ability=p['ability'],item=p['item'],status=STATUS[p['status']],status_turns=p['time'],boosts=p['boosts'].copy(),moves=moves))
+   mons[-1].shield_boosted=p.get('shieldBoost',False)
+   mons[-1].sword_boosted=p.get('swordBoost',False)
+  sides.append(BattleSide(mons,active_index=side['active'],hazards={hazard_keys[k]:v for k,v in side.get('hazards',{}).items()},screens=side['screens'].copy(),tailwind=side['tailwind']))
+ for side in sides:
+  for mon in side.pokemon:
+   for key in ('trapped','partiallytrapped'):
+    source=mon.volatiles.get(key,{}).get('source')
+    if source:
+     mon.volatiles[key]['source']=(source[0],next(i for i,p in enumerate(sides[source[0]-1].pokemon) if p.species==source[1]))
+ return BattleState(*sides,trick_room=data['trick_room'],turn=data.get('turn',1),pending_switches=tuple(data.get('pending',[])))
 
 @pytest.fixture(scope='module')
 def reference():
@@ -64,6 +74,8 @@ def test_official_transition_parity(case,reference):
  for choices,expected in zip(case.get('actions',[['move 1','move 1']]),ref['results']):
   actions=[]
   for side,command in zip((state.p1,state.p2),choices):
+   if not command:
+    actions.append(None);continue
    kind,slot=command.split();slot=int(slot)
    # Official side order swaps the active to slot 1; our arrays preserve slots.
    if kind=='switch':
@@ -82,6 +94,8 @@ def test_official_transition_parity(case,reference):
     assert [mv.pp for mv in ours.moves]==[mv['pp'] for mv in m['moves']]
    assert actual.screens==exp['screens']
    assert actual.tailwind==exp['tailwind']
+  assert state.pending_switches==tuple(expected.get('pending',[]))
+  assert state.turn==expected.get('turn',state.turn)
   assert state.trick_room==expected['trick_room']
 
 @pytest.mark.parametrize('status,low,high',[('par',0.17,0.33),('frz',0.70,0.89)])

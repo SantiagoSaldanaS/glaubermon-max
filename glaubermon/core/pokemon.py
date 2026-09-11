@@ -38,6 +38,8 @@ class Move:
     defrost: bool = False
     sleep_usable: bool = False
     sleep_talk_callable: bool = True
+    bypass_substitute: bool = False
+    volatile_status: Optional[str] = None
 
     def clone(self) -> "Move":
         """Copy mutable battle data without reloading or reinterpreting the Dex."""
@@ -82,7 +84,7 @@ class Move:
             try:
                 from glaubermon.data.showdown_dex import ShowdownDex
                 dex_m = ShowdownDex.get_instance().get_move(move_id)
-                secondary_meta = {k:deepcopy(getattr(dex_m,k)) for k in ("secondaries","defrost","sleep_usable","sleep_talk_callable")}
+                secondary_meta = {k:deepcopy(getattr(dex_m,k)) for k in ("secondaries","defrost","sleep_usable","sleep_talk_callable","bypass_substitute","volatile_status")}
                 if pp is None:
                     pp = dex_m.pp
                 if max_pp is None:
@@ -177,6 +179,7 @@ class Pokemon:
     booster_stat: Optional[str] = None
     choice_locked_move: Optional[str] = None
     raw_stats: Dict[str, int] = field(default_factory=dict)
+    volatiles: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         # 1. Fill species types if uninitialized and species exists in Dex
@@ -336,17 +339,17 @@ class Pokemon:
             t1, t2 = self.active_types
             eff = get_type_effectiveness(PokemonType.ROCK, t1, t2)
             fraction = 0.125 * eff
-            total_dmg += int(self.max_hp * fraction)
+            total_dmg += max(1,int(self.max_hp * fraction)) if eff else 0
 
         # Spikes (grounded check: Flying type, Levitate, Air Balloon)
         if self.is_grounded():
             spikes_lvl = hazards.get(Hazard.SPIKES_1, 0)
             if spikes_lvl == 1:
-                total_dmg += int(self.max_hp / 8)
+                total_dmg += max(1,self.max_hp // 8)
             elif spikes_lvl == 2:
-                total_dmg += int(self.max_hp / 6)
+                total_dmg += max(1,self.max_hp // 6)
             elif spikes_lvl >= 3:
-                total_dmg += int(self.max_hp / 4)
+                total_dmg += max(1,self.max_hp // 4)
 
         return total_dmg
 
@@ -364,4 +367,5 @@ class Pokemon:
         result.moves = [move.clone() for move in self.moves]
         result.boosts = dict(self.boosts)
         result.raw_stats = dict(self.raw_stats)
+        result.volatiles = deepcopy(self.volatiles)
         return result

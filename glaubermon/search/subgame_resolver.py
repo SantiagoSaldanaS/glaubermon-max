@@ -27,6 +27,7 @@ def reset_on_switch(mon):
     mon.protect_success_rate = 0.0
     mon.booster_stat = None
     mon.toxic_counter = 0
+    mon.volatiles.clear()
     if clean_key(mon.ability) == "naturalcure":
         mon.status = StatusCondition.NONE
         mon.status_turns = 0
@@ -42,6 +43,45 @@ def apply_entry_hazards(state: BattleState, side_idx: int, mon_idx: int):
         dmg = mon.calculate_hazard_damage(side.hazards)
         if dmg > 0:
             mon.take_damage(dmg)
+        if mon.is_fainted or clean_key(mon.item) == "heavydutyboots" or not mon.is_grounded():
+            return
+        toxic_layers = side.hazards.get(Hazard.TOXIC_SPIKES_1,0)
+        if toxic_layers:
+            if PokemonType.POISON in mon.active_types:
+                side.hazards.pop(Hazard.TOXIC_SPIKES_1,None)
+            elif (PokemonType.STEEL not in mon.active_types and mon.status == StatusCondition.NONE
+                  and clean_key(mon.ability) not in ("immunity","pastelveil") and state.terrain != Terrain.MISTY):
+                mon.status = StatusCondition.TOXIC if toxic_layers >= 2 else StatusCondition.POISON
+                mon.toxic_counter = 0
+        if side.hazards.get(Hazard.STICKY_WEB) and clean_key(mon.ability) not in ("clearbody","whitesmoke","fullmetalbody") and clean_key(mon.item) != "clearamulet":
+            delta = 1 if clean_key(mon.ability)=="contrary" else (-2 if clean_key(mon.ability)=="simple" else -1)
+            mon.boosts["spe"] = max(-6,min(6,mon.boosts.get("spe",0)+delta))
+
+
+def apply_entry_abilities(state,side_idx):
+    side,other = (state.p1,state.p2) if side_idx == 1 else (state.p2,state.p1)
+    mon,foe = side.active_pokemon,other.active_pokemon
+    if not mon or mon.is_fainted:
+        return
+    ability = clean_key(mon.ability)
+    if ability in ("dauntlessshield","intrepidsword"):
+        flag = "shield_boosted" if ability == "dauntlessshield" else "sword_boosted"
+        if not getattr(mon,flag,False):
+            key = "def" if ability == "dauntlessshield" else "atk"
+            mon.boosts[key] = min(6,mon.boosts.get(key,0)+1)
+            setattr(mon,flag,True)
+    if ability == "intimidate" and foe and not foe.is_fainted and "substitute" not in foe.volatiles:
+        foe_ability = clean_key(foe.ability)
+        if foe_ability in ("clearbody","whitesmoke","fullmetalbody","innerfocus","oblivious","owntempo","scrappy") or clean_key(foe.item)=="clearamulet":
+            return
+        target = mon if foe_ability == "mirrorarmor" else foe
+        delta = 1 if foe_ability in ("contrary","guarddog") else (-2 if foe_ability=="simple" else -1)
+        old = target.boosts.get("atk",0)
+        target.boosts["atk"] = max(-6,min(6,old+delta))
+        if target is foe and delta < 0 and old > -6:
+            if foe_ability == "defiant": foe.boosts["atk"] = min(6,foe.boosts["atk"]+2)
+            if foe_ability == "competitive": foe.boosts["spa"] = min(6,foe.boosts.get("spa",0)+2)
+        if foe_ability == "rattled": foe.boosts["spe"] = min(6,foe.boosts.get("spe",0)+1)
 
 
 def apply_tera_boosts(mon: Optional[Pokemon]):
@@ -62,6 +102,23 @@ def apply_tera_boosts(mon: Optional[Pokemon]):
             mon.boosts["spe"] = min(6, mon.boosts.get("spe", 0) + 1)
 
 
+def perform_switch(state, side_idx, target_slot):
+    side = state.p1 if side_idx == 1 else state.p2
+    if target_slot not in side.available_switches():
+        raise ValueError("Invalid replacement slot")
+    outgoing_index = side.active_index
+    if side.active_pokemon:
+        reset_on_switch(side.active_pokemon)
+    for other_side in (state.p1,state.p2):
+        for mon in other_side.pokemon:
+            for key in ("partiallytrapped","trapped"):
+                if mon.volatiles.get(key,{}).get("source") == (side_idx,outgoing_index):
+                    mon.volatiles.pop(key,None)
+    side.active_index = target_slot
+    apply_entry_hazards(state, side_idx, target_slot)
+    apply_entry_abilities(state, side_idx)
+
+
 def simulate_turn_transition(
     state: BattleState,
     a1: Action,
@@ -80,38 +137,52 @@ def simulate_turn_transition(
     """
     rng = rng if rng is not None else random
     s = state.clone()
+    if not s.pending_switches:
+        s.pending_switches = tuple(i for i,side in ((1,s.p1),(2,s.p2))
+            if side.active_pokemon and side.active_pokemon.is_fainted and not side.is_all_fainted)
     p1_active = s.p1.active_pokemon
     p2_active = s.p2.active_pokemon
-    if p1_active:
+    if p1_active and not s.pending_switches:
         p1_active.is_protected = False
         p1_active.protect_success_rate = 0.0
-    if p2_active:
+    if p2_active and not s.pending_switches:
         p2_active.is_protected = False
         p2_active.protect_success_rate = 0.0
 
-    # Phase 1: Handle Switches (Switches have highest priority)
-    p1_switched = False
-    p2_switched = False
-
-    if a1 is not None and a1.action_type == ActionType.SWITCH:
-        old_mon = s.p1.active_pokemon
-        if old_mon:
-            reset_on_switch(old_mon)
-        target_slot = getattr(a1, "target_slot") - 1
-        s.p1.active_index = target_slot
-        apply_entry_hazards(s, side_idx=1, mon_idx=target_slot)
-        p1_active = s.p1.active_pokemon
-        p1_switched = True
-
-    if a2 is not None and a2.action_type == ActionType.SWITCH:
-        old_mon = s.p2.active_pokemon
-        if old_mon:
-            reset_on_switch(old_mon)
-        target_slot = getattr(a2, "target_slot") - 1
-        s.p2.active_index = target_slot
-        apply_entry_hazards(s, side_idx=2, mon_idx=target_slot)
-        p2_active = s.p2.active_pokemon
-        p2_switched = True
+    resuming = bool(s.pending_switches)
+    saved = s.continuation
+    if resuming:
+        for side_idx, action in ((1, a1), (2, a2)):
+            if side_idx in s.pending_switches:
+                side = s.p1 if side_idx == 1 else s.p2
+                if action is None or action.action_type != ActionType.SWITCH or action.target_slot-1 not in side.available_switches():
+                    raise ValueError("A pending replacement requires a legal switch")
+            elif action is not None:
+                raise ValueError("The other player must wait during replacement")
+    p1_switched = p2_switched = False
+    for side_idx, action in ((1, a1), (2, a2)):
+        if action is not None and action.action_type == ActionType.SWITCH:
+            if not resuming and s.is_trapped(side_idx):
+                raise ValueError("A trapped Pokémon cannot switch voluntarily")
+            perform_switch(s, side_idx, action.target_slot-1)
+            if side_idx == 1: p1_switched = True
+            else: p2_switched = True
+    p1_active, p2_active = s.p1.active_pokemon, s.p2.active_pokemon
+    if resuming:
+        # Hazard KOs require another decision without advancing the clock.
+        s.pending_switches = tuple(i for i in s.pending_switches
+            if (s.p1 if i == 1 else s.p2).active_pokemon.is_fainted
+            and not (s.p1 if i == 1 else s.p2).is_all_fainted)
+        if s.pending_switches or s.is_game_over:
+            return s
+        if saved is None:
+            s.pending_switches = tuple(i for i,side in ((1,s.p1),(2,s.p2))
+                if side.active_pokemon and side.active_pokemon.is_fainted and not side.is_all_fainted)
+            if s.pending_switches:
+                return s
+            s.turn += 1
+            return s  # End-of-turn replacement, no second residual tick or attack.
+        s.continuation = None
 
     # Phase 2: Handle Terastallization
     if a1 is not None and a1.action_type == ActionType.MOVE and getattr(a1, "is_tera", False) and not s.p1.is_tera_used:
@@ -173,17 +244,24 @@ def simulate_turn_transition(
     else:
         order = []
 
-    # Execute moves in resolved order
-    moved_players = set()
-    flinched = set()
-    selected_users = {"p1":p1_active,"p2":p2_active}
-    for player, move in order:
+    # A pivot pauses this same turn. Preserve the original user's queued move,
+    # PP, Protect and flinch state; the incoming Pokémon cannot inherit an action.
+    if resuming:
+        moved_players = set(saved["moved"])
+        flinched = set(saved["flinched"])
+        selected_users = {who:(s.p1 if who == "p1" else s.p2).pokemon[idx]
+                          for who,idx in saved["users"].items()}
+        order = [(who, selected_users[who].moves[slot] if slot >= 0 else move)
+                 for who,slot,move in saved["order"]]
+        m1, m2 = saved["m1"], saved["m2"]
+    else:
+        moved_players = set()
+        flinched = set()
+        selected_users = {"p1":p1_active,"p2":p2_active}
+    for order_index, (player, move) in enumerate(order):
         attacker = p1_active if player == "p1" else p2_active
         defender = p2_active if player == "p1" else p1_active
 
-        if player in flinched:
-            moved_players.add(player)
-            continue
         if attacker is not selected_users[player]:
             continue  # A Pokémon dragged out before its turn cannot pass its move to the replacement.
         if attacker and not attacker.is_fainted and defender and not defender.is_fainted:
@@ -203,9 +281,6 @@ def simulate_turn_transition(
                 elif not move.sleep_usable:
                     moved_players.add(player)
                     continue
-            if attacker.status == StatusCondition.PARALYSIS and sample_outcomes and rng.random() < 0.25:
-                moved_players.add(player)
-                continue
             if attacker.status == StatusCondition.FREEZE:
                 defrost = move.defrost
                 if defrost or (sample_outcomes and rng.random() < 0.20):
@@ -213,6 +288,31 @@ def simulate_turn_transition(
                 else:
                     moved_players.add(player)
                     continue
+            if player in flinched:
+                moved_players.add(player)
+                continue
+            if "taunt" in attacker.volatiles and move.category == MoveCategory.STATUS and m_id != "mefirst":
+                moved_players.add(player)
+                continue
+            confusion = attacker.volatiles.get("confusion")
+            if confusion:
+                if confusion.get("time", -1) > 0:
+                    confusion["time"] -= 1
+                if confusion.get("time") == 0:
+                    attacker.volatiles.pop("confusion")
+                elif sample_outcomes and rng.random() < .33:
+                    level_term = 2 * attacker.level // 5 + 2
+                    def confusion_stat(key):
+                        stage = attacker.boosts.get(key,0)
+                        base = attacker.raw_stats.get(key,100)
+                        return base * (2+stage) // 2 if stage >= 0 else base * 2 // (2-stage)
+                    base = ((level_term * 40 * confusion_stat("atk") // max(1,confusion_stat("def"))) // 50 + 2) % 65536
+                    attacker.take_damage(max(1,base * rng.randint(85,100) // 100))
+                    moved_players.add(player)
+                    continue
+            if attacker.status == StatusCondition.PARALYSIS and sample_outcomes and rng.random() < 0.25:
+                moved_players.add(player)
+                continue
             atk_it = clean_key(attacker.item)
             if atk_it in ("choicespecs", "choiceband", "choicescarf") and not attacker.choice_locked_move:
                 attacker.choice_locked_move = m_id
@@ -285,6 +385,12 @@ def simulate_turn_transition(
             if move.category == MoveCategory.STATUS and targets_foe and clean_key(defender.ability) == "goodasgold":
                 moved_players.add(player)
                 continue
+            hits_substitute = ("substitute" in defender.volatiles and targets_foe
+                               and not move.bypass_substitute and not move.is_sound
+                               and clean_key(attacker.ability) != "infiltrator")
+            if hits_substitute and move.category == MoveCategory.STATUS:
+                moved_players.add(player)
+                continue
             actual_dmg = 0
             # 2. Damage calculation
             if move.category in (MoveCategory.PHYSICAL, MoveCategory.SPECIAL):
@@ -315,13 +421,23 @@ def simulate_turn_transition(
                     if succ_rate > 0.5 and getattr(defender, "last_protect_move", "") == "spikyshield" and is_contact:
                         attacker.take_damage(max(1, attacker.max_hp // 8))
                 else:
-                    actual_dmg = defender.take_damage(median_dmg)
+                    if hits_substitute:
+                        sub = defender.volatiles["substitute"]
+                        # Public logs hide exact remaining substitute HP. The local
+                        # search hypothesis starts with one quarter, marked unknown.
+                        sub_hp = sub.get("hp", -1)
+                        if sub_hp < 0: sub_hp = max(1,defender.max_hp // 4)
+                        actual_dmg = min(sub_hp, median_dmg)
+                        sub["hp"] = sub_hp - actual_dmg
+                        if sub["hp"] <= 0: defender.volatiles.pop("substitute")
+                    else:
+                        actual_dmg = defender.take_damage(median_dmg)
                     # Rocky Helmet chip on contact when attack connects
                     def_it = clean_key(defender.item)
-                    if actual_dmg > 0 and def_it == "rockyhelmet" and is_contact and clean_key(attacker.ability) != "magicguard":
+                    if not hits_substitute and actual_dmg > 0 and def_it == "rockyhelmet" and is_contact and clean_key(attacker.ability) != "magicguard":
                         attacker.take_damage(max(1, attacker.max_hp // 6))
 
-                if actual_dmg and defender.status == StatusCondition.FREEZE and move.move_type == PokemonType.FIRE:
+                if not hits_substitute and actual_dmg and defender.status == StatusCondition.FREEZE and move.move_type == PokemonType.FIRE:
                     defender.status = StatusCondition.NONE
                 if m_id == "struggle":
                     attacker.take_damage(max(1, (attacker.max_hp + 2) // 4))
@@ -331,14 +447,14 @@ def simulate_turn_transition(
                     defender.item = None
 
                 # Knock Off item removal (if attack lands and defender not protected)
-                if m_id == "knockoff" and succ_rate <= 0.5 and defender.item:
+                if not hits_substitute and actual_dmg > 0 and m_id == "knockoff" and succ_rate <= 0.5 and defender.item:
                     if is_removable_item(defender.item):
                         defender.item = None
 
                 # Drain moves: heal attacker by exact canonical ratio or default 50%
                 if actual_dmg > 0 and getattr(move, "drain", None):
                     num, den = move.drain
-                    drain_heal = max(1, actual_dmg * num // den)
+                    drain_heal = max(1, (actual_dmg * num + den - 1) // den)
                     attacker.heal(drain_heal)
                 elif actual_dmg > 0 and m_id in ("hornleech", "drainpunch", "gigadrain", "absorb", "megadrain", "drainingkiss", "oblivionwing", "bitterblade", "paraboliccharge"):
                     drain_heal = max(1, actual_dmg // 2)
@@ -371,7 +487,7 @@ def simulate_turn_transition(
                         attacker.boosts[stat_k] = max(-6, min(6, curr_b + boost_val))
 
             # Data-driven target-boosts / stat drops (Screech, Charm, Chilling Water, Mystical Fire, Icy Wind, etc.)
-            if getattr(move, "boosts", None):
+            if getattr(move, "boosts", None) and not hits_substitute:
                 is_blocked = (succ_rate > 0.5) or (move.category == MoveCategory.STATUS and def_ab == "goodasgold" and any(v < 0 for v in move.boosts.values()))
                 if not is_blocked:
                     for stat_k, boost_val in move.boosts.items():
@@ -389,7 +505,7 @@ def simulate_turn_transition(
                     for key,delta in sec.get("self",{}).get("boosts",{}).items():
                         if not attacker.is_fainted:
                             attacker.boosts[key] = max(-6,min(6,attacker.boosts.get(key,0)+delta))
-                    if defender.is_fainted or def_ab == "shielddust" or clean_key(defender.item)=="covertcloak":
+                    if hits_substitute or defender.is_fainted or def_ab == "shielddust" or clean_key(defender.item)=="covertcloak":
                         continue
                     for key,delta in sec.get("boosts",{}).items():
                         defender.boosts[key] = max(-6,min(6,defender.boosts.get(key,0)+delta))
@@ -397,6 +513,8 @@ def simulate_turn_transition(
                         other = "p2" if player=="p1" else "p1"
                         if other not in moved_players:
                             flinched.add(other)
+                    if sec.get("volatileStatus") == "confusion" and def_ab != "owntempo" and not (defender.is_grounded() and s.terrain == Terrain.MISTY):
+                        defender.volatiles.setdefault("confusion", {"time":rng.randint(2,5) if sample_outcomes else 3})
                     if defender.status == StatusCondition.NONE:
                         kind = sec.get("status")
                         immune = ((kind=="brn" and (PokemonType.FIRE in defender.active_types or def_ab in ("waterveil","waterbubble"))) or
@@ -408,6 +526,40 @@ def simulate_turn_transition(
                             statuses={"brn":StatusCondition.BURN,"par":StatusCondition.PARALYSIS,"psn":StatusCondition.POISON,"tox":StatusCondition.TOXIC,"frz":StatusCondition.FREEZE}
                             if kind in statuses:
                                 defender.status=statuses[kind]
+
+            if m_id == "substitute" and "substitute" not in attacker.volatiles and attacker.current_hp > attacker.max_hp / 4 and attacker.max_hp > 1:
+                cost = attacker.max_hp // 4
+                attacker.take_damage(cost)
+                attacker.volatiles["substitute"] = {"hp":cost}
+                attacker.volatiles.pop("partiallytrapped",None)
+            elif m_id == "taunt":
+                target = attacker if is_magic_bounce else defender
+                if clean_key(target.ability) not in ("oblivious","aromaveil","goodasgold"):
+                    if clean_key(target.item) == "mentalherb":
+                        target.item = None
+                    else:
+                        other = player if is_magic_bounce else ("p2" if player == "p1" else "p1")
+                        # A late Taunt includes three *future* turns after this residual.
+                        target.volatiles.setdefault("taunt", {"duration":4 if is_magic_bounce or other in moved_players else 3})
+            elif move.volatile_status == "confusion":
+                target = attacker if is_magic_bounce else defender
+                if clean_key(target.ability) != "owntempo" and not (target.is_grounded() and s.terrain == Terrain.MISTY):
+                    target.volatiles.setdefault("confusion", {"time":rng.randint(2,5) if sample_outcomes else 3})
+            elif (move.volatile_status in ("partiallytrapped", "trapped") or m_id in ("meanlook","block","spiderweb")) and not hits_substitute and not defender.is_fainted:
+                if move.category == MoveCategory.STATUS or actual_dmg > 0:
+                    source_side = 1 if player == "p1" else 2
+                    source = (source_side,(s.p1 if source_side == 1 else s.p2).active_index)
+                    if move.volatile_status == "partiallytrapped":
+                        duration = 8 if clean_key(attacker.item)=="gripclaw" else (rng.randint(5,6) if sample_outcomes else 5)
+                        defender.volatiles.setdefault("partiallytrapped", {"duration":duration,"source":source,
+                            "divisor":6 if clean_key(attacker.item)=="bindingband" else 8})
+                    elif PokemonType.GHOST not in defender.active_types:
+                        target = attacker if is_magic_bounce else defender
+                        if PokemonType.GHOST not in target.active_types:
+                            if is_magic_bounce:
+                                source_side = 3-source_side
+                                source = (source_side,(s.p1 if source_side == 1 else s.p2).active_index)
+                            target.volatiles.setdefault("trapped", {"source":source})
 
             # Side/field effects are public and have finite cartridge durations.
             user_side = s.p1 if player == "p1" else s.p2
@@ -427,6 +579,12 @@ def simulate_turn_transition(
                 if not is_blocked:
                     user_side = s.p1 if player == "p1" else s.p2
                     user_side.hazards.clear()
+                    attacker.volatiles.pop("partiallytrapped",None)
+                    if m_id == "tidyup":
+                        s.p1.hazards.clear()
+                        s.p2.hazards.clear()
+                        attacker.volatiles.pop("substitute",None)
+                        defender.volatiles.pop("substitute",None)
             elif m_id == "courtchange":
                 s.p1.hazards, s.p2.hazards = s.p2.hazards, s.p1.hazards
                 s.p1.screens, s.p2.screens = s.p2.screens, s.p1.screens
@@ -453,35 +611,10 @@ def simulate_turn_transition(
                 s.terrain_turns = 0
             elif m_id in ("uturn", "voltswitch", "flipturn"):
                 user_side = s.p1 if player == "p1" else s.p2
-                succ_rate = getattr(defender, "protect_success_rate", 0.0)
-                # If Protect / Spiky Shield succeeded, pivot move is blocked and DOES NOT switch!
-                if succ_rate <= 0.5 and actual_dmg > 0 and not attacker.is_fainted:
-                    switches = user_side.available_switches()
-                    if switches:
-                        best_sw = switches[0]
-                        best_score = -999.0
-                        def_types = defender.active_types if defender else (PokemonType.NORMAL, None)
-                        for sw_idx in switches:
-                            sw_mon = user_side.pokemon[sw_idx]
-                            type_weakness = 1.0
-                            for dt in def_types:
-                                if dt:
-                                    t1, t2 = sw_mon.active_types
-                                    type_weakness *= get_type_effectiveness(dt, t1, t2)
-                            score = sw_mon.hp_percent * 2.0 - type_weakness
-                            if score > best_score:
-                                best_score = score
-                                best_sw = sw_idx
-
-                        reset_on_switch(attacker)
-                        user_side.active_index = best_sw
-                        apply_entry_hazards(s, side_idx=1 if player == "p1" else 2, mon_idx=best_sw)
-                        if player == "p1":
-                            p1_active = s.p1.active_pokemon
-                        else:
-                            p2_active = s.p2.active_pokemon
+                if succ_rate <= 0.5 and actual_dmg > 0 and not attacker.is_fainted and user_side.available_switches() and not s.is_game_over:
+                    s.pending_switches = (1 if player == "p1" else 2,)
             elif m_id in ("whirlwind", "roar", "dragontail", "circlethrow"):
-                if (move.category != MoveCategory.STATUS and actual_dmg == 0) or defender.is_fainted or def_ab == "suctioncups":
+                if (move.category != MoveCategory.STATUS and (actual_dmg == 0 or hits_substitute)) or defender.is_fainted or def_ab == "suctioncups":
                     pass
                 elif m_id in ("whirlwind", "roar") and def_ab == "goodasgold":
                     pass  # Good as Gold is immune to status phazing
@@ -490,9 +623,7 @@ def simulate_turn_transition(
                     u_side = s.p1 if player == "p1" else s.p2
                     u_sw = u_side.available_switches()
                     if u_sw:
-                        reset_on_switch(attacker)
-                        u_side.active_index = rng.choice(u_sw) if sample_outcomes else u_sw[0]
-                        apply_entry_hazards(s, side_idx=1 if player == "p1" else 2, mon_idx=u_side.active_index)
+                        perform_switch(s,1 if player == "p1" else 2,rng.choice(u_sw) if sample_outcomes else u_sw[0])
                         if player == "p1":
                             p1_active = s.p1.active_pokemon
                         else:
@@ -502,9 +633,7 @@ def simulate_turn_transition(
                     opp_sw = opp_side.available_switches()
                     if opp_sw:
                         opp_target = rng.choice(opp_sw) if sample_outcomes else opp_sw[0]
-                        reset_on_switch(defender)
-                        opp_side.active_index = opp_target
-                        apply_entry_hazards(s, side_idx=2 if player == "p1" else 1, mon_idx=opp_target)
+                        perform_switch(s,2 if player == "p1" else 1,opp_target)
                         if player == "p1":
                             p2_active = s.p2.active_pokemon
                         else:
@@ -534,6 +663,16 @@ def simulate_turn_transition(
                     target_mon.status = StatusCondition.PARALYSIS
 
             moved_players.add(player)
+            if s.pending_switches:
+                remaining = []
+                for who, queued_move in order[order_index+1:]:
+                    user = selected_users[who]
+                    slot = next((i for i,m in enumerate(user.moves) if m is queued_move), -1)
+                    remaining.append((who, slot, queued_move.clone()))
+                s.continuation = dict(order=remaining, moved=list(moved_players), flinched=list(flinched),
+                    users={who:next(i for i,p in enumerate((s.p1 if who == "p1" else s.p2).pokemon) if p is mon)
+                           for who,mon in selected_users.items() if mon}, m1=m1, m2=m2)
+                return s
 
     if s.is_game_over:
         return s  # Showdown ends immediately; no residual damage/healing or duration tick.
@@ -568,6 +707,21 @@ def simulate_turn_transition(
             elif act_mon.status == StatusCondition.BURN and ab != "magicguard":
                 act_mon.take_damage(max(1, act_mon.max_hp // 16))
 
+            trap = act_mon.volatiles.get("partiallytrapped")
+            if trap:
+                source = trap.get("source")
+                source_mon = (s.p1 if source[0] == 1 else s.p2).pokemon[source[1]] if source else None
+                source_active = not source or ((s.p1 if source[0] == 1 else s.p2).active_index == source[1] and not source_mon.is_fainted)
+                if trap.get("duration",-1) > 0: trap["duration"] -= 1
+                if not source_active or trap.get("duration") == 0:
+                    act_mon.volatiles.pop("partiallytrapped")
+                elif ab != "magicguard":
+                    act_mon.take_damage(max(1,act_mon.max_hp // trap.get("divisor",8)))
+            taunt = act_mon.volatiles.get("taunt")
+            if taunt and taunt.get("duration",-1) > 0:
+                taunt["duration"] -= 1
+                if not taunt["duration"]: act_mon.volatiles.pop("taunt")
+
             # Status Orbs
             if not act_mon.is_fainted and act_mon.status == StatusCondition.NONE:
                 if it == "flameorb" and PokemonType.FIRE not in act_mon.active_types:
@@ -581,19 +735,10 @@ def simulate_turn_transition(
         side.tailwind = max(0,side.tailwind-1)
         side.screens = {name:(turns-1 if turns>0 else turns) for name,turns in side.screens.items() if turns != 1}
     s.trick_room = max(0,s.trick_room-1)
-    s.turn += 1
-
-    # Auto-switch fainted active Pokémon so subsequent turn evaluations are clean
-    # Note: Do not inflict entry hazards here; hazards only trigger when a Pokémon actually switches in or is chosen via forced switch
-    if not sample_outcomes and s.p1.active_pokemon and s.p1.active_pokemon.is_fainted and not s.p1.is_all_fainted:
-        sw1 = s.p1.available_switches()
-        if sw1:
-            s.p1.active_index = sw1[0]
-
-    if not sample_outcomes and s.p2.active_pokemon and s.p2.active_pokemon.is_fainted and not s.p2.is_all_fainted:
-        sw2 = s.p2.available_switches()
-        if sw2:
-            s.p2.active_index = sw2[0]
+    s.pending_switches = tuple(i for i,side in ((1,s.p1),(2,s.p2))
+        if side.active_pokemon and side.active_pokemon.is_fainted and not side.is_all_fainted)
+    if not s.pending_switches and not s.is_game_over:
+        s.turn += 1
 
     return s
 
@@ -610,6 +755,37 @@ class SubgameResolver:
         self.evaluator = evaluator or HeuristicEvaluator()
         self.switch_penalty = switch_penalty
         self.faint_penalty = faint_penalty
+
+    def _resolve_replacements(self, state, depth, sample, return_both_players=False):
+        """Only the requested sides choose; queued attacks resume on that choice.
+
+        A replacement does not consume another search turn. Simultaneous faint
+        replacements form a switch-only matrix; a single replacement is max/min.
+        """
+        actions1 = state.get_valid_actions(1) if 1 in state.pending_switches else [None]
+        actions2 = state.get_valid_actions(2) if 2 in state.pending_switches else [None]
+        matrix = np.zeros((len(actions1),len(actions2)))
+        for i,a1 in enumerate(actions1):
+            for j,a2 in enumerate(actions2):
+                child = simulate_turn_transition(state,a1,a2)
+                if child.is_game_over:
+                    value = 15.0 if child.winner == 1 else (-15.0 if child.winner == 2 else 0.0)
+                elif child.pending_switches:
+                    value = self._resolve_replacements(child,depth,False)[3]
+                elif depth > 0:
+                    value = self.resolve_turn(child,depth=depth,sample=False)[3]
+                else:
+                    value = self.evaluator.evaluate(child)
+                matrix[i,j] = value
+        pi1,pi2,value = solve_zero_sum_game(matrix)
+        i = int(np.random.choice(len(pi1),p=pi1)) if sample else int(np.argmax(pi1))
+        j = int(np.random.choice(len(pi2),p=pi2)) if sample else int(np.argmax(pi2))
+        result = (actions1[i],pi1 if actions1[0] is not None else np.array([]),
+                  actions1 if actions1[0] is not None else [],float(value))
+        if return_both_players:
+            return result + (actions2[j],pi2 if actions2[0] is not None else np.array([]),
+                             actions2 if actions2[0] is not None else [])
+        return result
 
     def resolve_turn(
         self,
@@ -637,6 +813,9 @@ class SubgameResolver:
             if return_both_players:
                 return (None, np.array([]), [], val, None, np.array([]), [])
             return (None, np.array([]), [], val)
+
+        if state.pending_switches:
+            return self._resolve_replacements(state,depth,sample,return_both_players)
 
         p1_actions = p1_actions_override if p1_actions_override is not None else state.get_valid_actions(player=1)
         p2_actions = state.get_valid_actions(player=2)
@@ -697,8 +876,8 @@ class SubgameResolver:
             except Exception:
                 active_priors = None
 
-        spe1_before = p1_mon_before.effective_stat("spe") if p1_mon_before and not p1_mon_before.is_fainted else 0
-        spe2_before = p2_mon_before.effective_stat("spe") if p2_mon_before and not p2_mon_before.is_fainted else 0
+        spe1_before = speed_order_key(p1_mon_before, state.p1, state) if p1_mon_before and not p1_mon_before.is_fainted else 0
+        spe2_before = speed_order_key(p2_mon_before, state.p2, state) if p2_mon_before and not p2_mon_before.is_fainted else 0
 
         # Simulate all (a1, a2) transitions and evaluate base payoffs
         transitions = []
@@ -754,15 +933,22 @@ class SubgameResolver:
                         eval_coords.append((i, j, 0))
 
         if states_to_eval:
-            if hasattr(self.evaluator, "evaluate_batch"):
-                batch_vals = self.evaluator.evaluate_batch(states_to_eval)
-            else:
-                batch_vals = [self.evaluator.evaluate(s) for s in states_to_eval]
-            for (i, j, tie_idx), v in zip(eval_coords, batch_vals):
+            # Replacement nodes must resolve their remaining turn before evaluation.
+            batch_indices = [i for i,child in enumerate(states_to_eval) if not child.pending_switches]
+            batch_states = [states_to_eval[i] for i in batch_indices]
+            values = {}
+            if batch_states:
+                batch_values = (self.evaluator.evaluate_batch(batch_states) if hasattr(self.evaluator,"evaluate_batch")
+                                else [self.evaluator.evaluate(child) for child in batch_states])
+                values.update(zip(batch_indices,batch_values))
+            for i,child in enumerate(states_to_eval):
+                if child.pending_switches:
+                    values[i] = self._resolve_replacements(child,0,False)[3]
+            for k,(i,j,tie_idx) in enumerate(eval_coords):
                 if tie_idx == 0:
-                    base_M[i, j] = float(v)
+                    base_M[i,j] = float(values[k])
                 else:
-                    base_M[i, j] += 0.5 * float(v)
+                    base_M[i,j] += .5 * float(values[k])
 
         M = base_M.copy()
 

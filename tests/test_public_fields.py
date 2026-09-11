@@ -67,3 +67,47 @@ def test_mirror_booster_effects_are_side_specific():
  state=b.build_battle_state(room,request())
  assert state.p1.active_pokemon.booster_stat is None
  assert state.p2.active_pokemon.booster_stat=='spe'
+
+
+def test_public_volatiles_are_side_specific_and_keep_hidden_values_unknown():
+ from glaubermon.models.embeddings import encode_pokemon
+ b=bot();room='battle-volatiles'
+ asyncio.run(b.handle_message('>'+room+'\n|player|p1|GlaubermonAI|\n|poke|p2|Great Tusk, L100|\n|switch|p1a: Great Tusk|Great Tusk, L100|100/371\n|switch|p2a: Great Tusk|Great Tusk, L100|100/100\n|-start|p2a: Great Tusk|Substitute\n|-start|p2a: Great Tusk|move: Taunt\n|-start|p1a: Great Tusk|confusion\n|-activate|p1a: Great Tusk|move: Magma Storm|[of] p2a: Great Tusk'))
+ state=b.build_battle_state(room,request())
+ assert state.p1.active_pokemon.volatiles['confusion']=={'time':-1}
+ assert state.p1.active_pokemon.volatiles['partiallytrapped']['source']==(2,0)
+ assert state.p2.active_pokemon.volatiles['substitute']=={'hp':-1}
+ assert state.p2.active_pokemon.volatiles['taunt']=={'duration':-1}
+ assert 'substitute' not in state.p1.active_pokemon.volatiles
+ assert state.is_trapped(1)
+ tensors=encode_battle_state(state)
+ assert tensors[0][1].shape==(6,68)
+ assert tensors[1][1][0,64]==-1 and tensors[1][1][0,65]<0
+ assert torch.equal(tensors[1][1][0],encode_pokemon(state.p2.active_pokemon,True)[1])
+ asyncio.run(b.handle_message('>'+room+'\n|-end|p1a: Great Tusk|confusion\n|switch|p2a: Great Tusk|Great Tusk, L100|100/100'))
+ state=b.build_battle_state(room,request())
+ assert not state.p1.active_pokemon.volatiles and not state.p2.active_pokemon.volatiles
+
+
+def test_public_force_request_reaches_actions_and_phase_features():
+ from glaubermon.core.types import ActionType
+ b=bot();req=request();req['forceSwitch']=[True]
+ state=b.build_battle_state('battle-force-request',req)
+ assert state.pending_switches==(1,)
+ assert all(a.action_type==ActionType.SWITCH for a in state.get_valid_actions(1))
+ assert state.get_valid_actions(2)==[]
+ assert encode_battle_state(state)[2][37]==1
+
+
+def test_legacy_token_import_zeros_new_observations_without_mutating_source():
+ model=GlaubermonMaxNet(d_model=32,nhead=4).eval()
+ old={key:value.clone() for key,value in model.state_dict().items()}
+ old['mon_projector.0.weight']=old['mon_projector.0.weight'][:,:-4].clone()
+ original=old['field_fc.0.weight'].clone()
+ model.load_compatible_state_dict(old)
+ assert torch.equal(old['field_fc.0.weight'],original)
+ assert torch.count_nonzero(model.mon_projector[0].weight[:,-4:])==0
+ assert torch.count_nonzero(model.field_fc[0].weight[:,37:40])==0
+ token=torch.randn(2,model.mon_projector[0].in_features)
+ baseline=token.clone();baseline[:,-4:]=0
+ assert torch.allclose(model.mon_projector(token),model.mon_projector(baseline),atol=1e-6)

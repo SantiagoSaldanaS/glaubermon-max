@@ -1,10 +1,15 @@
 // Official, isolated mechanics fixtures. Gen 9 custom game permits controlled sets.
 const {Battle}=require(process.argv[2]);
 const input=JSON.parse(require('fs').readFileSync(0,'utf8'));
-function mon(p) {return {species:p.species.name,types:p.getTypes(),hp:p.hp,maxhp:p.maxhp,stats:p.storedStats,
- ability:p.ability,item:p.item,status:p.status,time:p.statusState.time||0,boosts:p.boosts,
+function mon(p) {return {species:p.species.name,level:p.level,types:p.getTypes(),hp:p.hp,maxhp:p.maxhp,stats:{...p.storedStats},
+ shieldBoost:!!p.shieldBoost,swordBoost:!!p.swordBoost,ability:p.ability,item:p.item,status:p.status,time:p.statusState.time||0,boosts:{...p.boosts},
+ volatiles:Object.fromEntries(['substitute','taunt','confusion','partiallytrapped','trapped'].filter(k=>p.volatiles[k]).map(k=>{
+ const v=p.volatiles[k];return [k,{...(v.hp!==undefined?{hp:v.hp}:{}),...(v.duration!==undefined?{duration:v.duration}:{}),
+ ...(v.time!==undefined?{time:v.time}:{}),...(v.boundDivisor?{divisor:v.boundDivisor}:{}),
+ ...(['partiallytrapped','trapped'].includes(k)&&v.source?{source:[v.source.side.n+1,v.source.species.name]}:{})}];})),
  moves:p.moveSlots.map(m=>({id:m.id,pp:m.pp,maxpp:m.maxpp}))};}
-function snap(b) {return {sides:b.sides.map(s=>({active:s.pokemon.indexOf(s.active[0]),mons:s.pokemon.map(mon),
+function snap(b) {return {turn:b.turn,pending:b.ended?[]:b.sides.filter(s=>s.activeRequest?.forceSwitch?.[0]).map(s=>s.n+1),sides:b.sides.map(s=>({active:s.pokemon.indexOf(s.active[0]),mons:s.pokemon.map(mon),
+ hazards:Object.fromEntries(['stealthrock','spikes','toxicspikes','stickyweb'].filter(k=>s.sideConditions[k]).map(k=>[k,s.sideConditions[k].layers||1])),
  screens:Object.fromEntries(['reflect','lightscreen','auroraveil'].filter(k=>s.sideConditions[k]).map(k=>[k,s.sideConditions[k].duration])),
  tailwind:s.sideConditions.tailwind?.duration||0})),trick_room:b.field.pseudoWeather.trickroom?.duration||0};}
 const output=[];
@@ -20,10 +25,18 @@ for (const fixture of input) {
   if(c.hp!==undefined)p.hp=c.hp;
   if(c.status){p.setStatus(c.status);if(c.time!==undefined)p.statusState.time=c.time;}
   if(c.boosts)Object.assign(p.boosts,c.boosts);
+  if(c.stats)Object.assign(p.storedStats,c.stats);
+  if(c.pp)p.moveSlots.forEach((m,i)=>{m.pp=c.pp[i];});
+  for(const k of c.hazards||[]) b.sides[i].addSideCondition(k,p);
+  for(const [key,config] of Object.entries(c.volatiles||{})) {
+   p.addVolatile(key,b.sides[1-i].active[0],b.dex.moves.get(key==='partiallytrapped'?'magmastorm':key));
+   Object.assign(p.volatiles[key],config);
+  }
   if(c.tailwind)b.sides[i].addSideCondition('tailwind',p);
   for(const k of c.screens||[])b.sides[i].addSideCondition(k,p);
  }
  if(fixture.trick_room)b.field.addPseudoWeather('trickroom',b.sides[0].active[0]);
+ if(fixture.initial?.some(c=>c.pp)) b.makeRequest("move");
  const before=snap(b), results=[];
  for(const choices of fixture.actions||[['move 1','move 1']]) { b.makeChoices(...choices);results.push(snap(b));if(b.ended)break; }
  output.push({name:fixture.name,before,results,log:b.log});

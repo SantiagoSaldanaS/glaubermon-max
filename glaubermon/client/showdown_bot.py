@@ -256,6 +256,7 @@ class ShowdownBot:
         self.last_rqid: Dict[str, int] = {}
         self.room_turn: Dict[str, int] = {}
         self.public_fields = {}
+        self.public_volatiles = {}
         self.active_species_by_side = {}
         self.revealed_items = {}
         self.revealed_abilities = {}
@@ -332,6 +333,8 @@ class ShowdownBot:
             if room:
                 from glaubermon.client.field_tracker import PublicFieldTracker
                 self.public_fields.setdefault(room, PublicFieldTracker()).ingest(parts)
+                from glaubermon.client.volatile_tracker import PublicVolatileTracker
+                self.public_volatiles.setdefault(room, PublicVolatileTracker()).ingest(parts)
 
             # 1. Handle Login Challenge String
             if command == "challstr":
@@ -1195,9 +1198,21 @@ class ShowdownBot:
             opp_k = normalize_species_key(p2_side.active_pokemon.species)
             p2_side.active_pokemon.protect_streak = self.protect_streaks.get(room, {}).get(opp_tag, {}).get(opp_k, 0)
 
+        from glaubermon.client.volatile_tracker import PublicVolatileTracker
+        tracker = self.public_volatiles.get(room,PublicVolatileTracker())
+        sides = {our_tag:(1,p1_side),opp_tag:(2,p2_side)}
+        for tag,(_,side) in sides.items():
+            for mon in side.pokemon:
+                mon.volatiles = tracker.observations(tag,mon.species,sides)
+                for flag in tracker.entry_once.get((tag,clean_key(mon.species)),set()):
+                    setattr(mon,flag,True)
+        if p1_side.active_pokemon and req.get("active",[{}])[0].get("trapped"):
+            p1_side.active_pokemon.volatiles["request_trapped"] = {}
+
         weather = self.room_weather.get(room, Weather.NONE)
         terrain = self.room_terrain.get(room, Terrain.NONE)
-        return BattleState(p1=p1_side, p2=p2_side, weather=weather, terrain=terrain, turn=self.room_turn.get(room, 1), trick_room=fields.trick_room,
+        return BattleState(p1=p1_side, p2=p2_side, pending_switches=(1,) if any(req.get("forceSwitch",[])) else (),
+                           weather=weather, terrain=terrain, turn=self.room_turn.get(room, 1), trick_room=fields.trick_room,
                            weather_turns=-1 if weather != Weather.NONE else 0, terrain_turns=-1 if terrain != Terrain.NONE else 0)
 
     def select_lead_order(self, room: str, req: Optional[Dict] = None) -> str:
@@ -1314,75 +1329,18 @@ class ShowdownBot:
         logger.info(f"[{room}] DEBUG P2 Active: {p2_act.species if p2_act else 'None'} (HP: {p2_act.current_hp if p2_act else 0}/{p2_act.max_hp if p2_act else 0}) [Tera Available: {not state.p2.is_tera_used}]")
         logger.info(f"[{room}] DEBUG P2 Team: {[f'{p.species}({p.current_hp}/{p.max_hp})' for p in state.p2.pokemon]}")
 
-        # Forced Switch: Evaluates face-to-face replacement state without voluntary switch penalties
-        if req.get("forceSwitch"):
-            live_switches = []
-            safe_switches = []
-            our_hazards = state.p1.hazards
-            for slot_idx, p in enumerate(req.get("side", {}).get("pokemon", [])):
-                cond = p.get("condition", "")
-                if not p.get("active", False) and "fnt" not in cond and not p.get("fainted", False):
-                    spec = p.get("details", "").split(",")[0].strip()
-                    sw_act = SwitchAction(target_slot=slot_idx + 1, species=spec)
-                    live_switches.append(sw_act)
-                    if slot_idx < len(state.p1.pokemon):
-                        mon_obj = state.p1.pokemon[slot_idx]
-                        if not mon_obj.is_dead_to_hazards(our_hazards):
-                            safe_switches.append(sw_act)
-            candidate_switches = safe_switches if safe_switches else live_switches
-            if candidate_switches:
-                best_cand = candidate_switches[0]
-                best_val = -float('inf')
-                fallen = sum(1 for p in state.p1.pokemon if p.is_fainted)
-
-                for cand in candidate_switches:
-                    slot_0 = cand.target_slot - 1
-                    s_cand = state.clone()
-                    s_cand.p1.active_index = slot_0
-                    apply_entry_hazards(s_cand, 1, slot_0)
-
-                    # Evaluate candidate on its ability to fight/attack face-to-face!
-                    # Do not allow switch actions during replacement evaluation to prevent suicidal mons
-                    # from inflating their value by claiming a defensive pivot reward for immediately fleeing!
-                    cand_moves = [a for a in s_cand.get_valid_actions(1) if a.action_type == ActionType.MOVE]
-                    moves_override = cand_moves if cand_moves else None
-
-                    _, _, _, cand_val = await asyncio.to_thread(
-                        self.resolver.resolve_turn, s_cand, 1, False, moves_override, 0, False
-                    )
-
-                    cand_mon = state.p1.pokemon[slot_0] if slot_0 < len(state.p1.pokemon) else None
-                    if cand_mon:
-                        spec_key = clean_key(cand_mon.species)
-                        # Kingambit Supreme Overlord Early Preservation:
-                        # If early game (< 3 fallen allies), preserve Kingambit for late game cleaner,
-                        # UNLESS Kingambit holds a guaranteed priority lethal revenge kill!
-                        if spec_key == "kingambit" and fallen < 3:
-                            has_priority_kill = False
-                            opp_mon = state.p2.active_pokemon
-                            if opp_mon and not opp_mon.is_fainted:
-                                for mv in cand_mon.moves:
-                                    if getattr(mv, "priority", 0) > 0 and mv.category in (MoveCategory.PHYSICAL, MoveCategory.SPECIAL):
-                                        rolls = calculate_damage_rolls(cand_mon, opp_mon, mv, state.weather, state.terrain, attacker_side=s_cand.p1)
-                                        if rolls and min(rolls) >= opp_mon.current_hp:
-                                            has_priority_kill = True
-                                            break
-                            if not has_priority_kill:
-                                cand_val -= 8.0 * (3 - fallen)
-
-                    logger.info(f"[{room}] Forced Switch Candidate Slot {cand.target_slot} ({cand.species}): Face-to-Face Value = {cand_val:.2f}")
-                    if cand_val > best_val:
-                        best_val = cand_val
-                        best_cand = cand
-
-                chosen_species = best_cand.species or "Unknown"
-                logger.info(f"[{room}] Nash Forced Switch Selected -> Slot {best_cand.target_slot} ({chosen_species}) (Best Val: {best_val:.3f})")
-                self.last_action_was_switch[room] = False
-                if self.stealth_mode:
-                    sw_delay = random.uniform(1.8, 3.5)
-                    logger.info(f"[{room}] Stealth: Simulating human switch reaction ({sw_delay:.1f}s)...")
-                    await asyncio.sleep(sw_delay)
-                await self.ws.send(f"{room}|/choose switch {best_cand.target_slot}")
+        # Public requests identify who must replace, but do not reveal an enemy's
+        # queued move. Evaluate the replacement from the public hypothesis only.
+        if any(req.get("forceSwitch", [])):
+            action, strategy, actions, value = await asyncio.to_thread(
+                self.resolver.resolve_turn, state, 1, False)
+            if action is None or action.action_type != ActionType.SWITCH:
+                raise RuntimeError("Replacement phase produced no switch")
+            self.last_action_was_switch[room] = False
+            logger.info(f"[{room}] Replacement decision: {action}, value={value:.3f}")
+            if self.stealth_mode:
+                await asyncio.sleep(random.uniform(1.8,3.5))
+            await self.ws.send(f"{room}|/choose switch {action.target_slot}")
             return
 
         p1_actions_override = None
@@ -1407,10 +1365,8 @@ class ShowdownBot:
                     if it in ("choicespecs", "choiceband", "choicescarf"):
                         p1_act.choice_locked_move = active_req_moves[legal_move_slots[0] - 1].get("id", "")
             else:
-                # All moves are disabled: only legal actions are switches
                 switches_only = [a for a in current_actions if a.action_type == ActionType.SWITCH]
-                if switches_only:
-                    p1_actions_override = switches_only
+                p1_actions_override = [MoveAction("struggle",1)] + switches_only
 
         if req.get("active", [{}])[0].get("trapped"):
             p1_actions_override = [a for a in (p1_actions_override if p1_actions_override is not None else state.get_valid_actions(1))

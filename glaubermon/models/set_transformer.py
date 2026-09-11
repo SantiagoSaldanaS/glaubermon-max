@@ -126,6 +126,13 @@ class GlaubermonMaxNet(nn.Module):
         old = weights.get("field_fc.0.weight")
         if old is not None and old.shape[1] == 16:
             weights["field_fc.0.weight"] = torch.nn.functional.pad(old,(0,24))
+        old_mon = weights.get("mon_projector.0.weight")
+        expected = self.mon_projector[0].in_features
+        if old_mon is not None and old_mon.shape[1] == expected - 4:
+            weights["mon_projector.0.weight"] = torch.nn.functional.pad(old_mon,(0,4))
+            if "field_fc.0.weight" in weights:
+                weights["field_fc.0.weight"] = weights["field_fc.0.weight"].clone()
+                weights["field_fc.0.weight"][:,37:40] = 0
         return self.load_state_dict(weights)
 
     def _encode_team(self, moves_t: torch.Tensor, stats_t: torch.Tensor) -> torch.Tensor:
@@ -140,6 +147,8 @@ class GlaubermonMaxNet(nn.Module):
         m_pooled = m_pooled.view(b, num_mons, -1)
 
         # Concatenate move embeddings with rich Pokémon stat vector
+        if stats_t.shape[-1] == 64:
+            stats_t = torch.nn.functional.pad(stats_t,(0,4))
         mon_features = torch.cat([m_pooled, stats_t], dim=-1)  # (batch, 6, move_emb_dim + STAT_DIM)
         mon_tokens = self.mon_projector(mon_features)  # (batch, 6, d_model)
 
