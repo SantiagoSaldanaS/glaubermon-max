@@ -18,6 +18,9 @@ import time
 import signal
 import random
 import argparse
+import asyncio
+import hashlib
+from pathlib import Path
 from collections import deque
 from dataclasses import replace
 from typing import List, Tuple, Dict, Optional
@@ -114,14 +117,36 @@ class AlphaZeroTrainer:
 
     def __init__(
         self,
-        checkpoint_dir: str = "runs/rebel-corrections",
+        checkpoint_dir: str = "runs/rebel-official-v2",
         d_model: int = 256,
         nhead: int = 8,
         lr: float = 3e-4,
         device: Optional[torch.device] = None,
         reset_from_scratch: bool = False,
         mechanics_seed: int = 0,
+        rollout_backend: str = "showdown",
+        showdown_path: Optional[str] = None,
+        max_turns: int = 300,
+        depth: int = 1,
     ):
+        if rollout_backend not in ("showdown", "internal-privileged"):
+            raise ValueError("Unknown rollout backend")
+        if max_turns < 1 or depth < 1:
+            raise ValueError("max_turns and depth must be positive")
+        self.rollout_backend = rollout_backend
+        self.rollout_mode = "official_public_v2" if rollout_backend == "showdown" else "sampled_internal_privileged_v2"
+        project_root = Path(__file__).resolve().parents[2]
+        local_showdown = project_root / 'tools/showdown/node_modules/pokemon-showdown'
+        legacy_showdown = project_root.parent / 'showdown-parity/node_modules/pokemon-showdown'
+        self.showdown_path = str(Path(showdown_path).resolve()) if showdown_path else str(local_showdown if local_showdown.exists() else legacy_showdown)
+        if rollout_backend == 'showdown' and not Path(self.showdown_path, 'package.json').exists():
+            raise FileNotFoundError("Install the pinned official simulator and set --showdown-path before training")
+        self.max_turns = max_turns
+        self.depth = depth
+        self.last_game_info = {}
+        random.seed(mechanics_seed)
+        np.random.seed(mechanics_seed)
+        torch.manual_seed(mechanics_seed)
         self.checkpoint_dir = checkpoint_dir
         os.makedirs(self.checkpoint_dir, exist_ok=True)
         self.latest_ckpt = os.path.join(self.checkpoint_dir, "glaubermon_rebel_latest.pt")
@@ -146,6 +171,7 @@ class AlphaZeroTrainer:
         # Meta tracking
         self.total_games = 0
         self.total_turns = 0
+        self.total_samples = 0
         self.start_time = time.time()
         self.elapsed_offset = 0.0
 
@@ -157,6 +183,20 @@ class AlphaZeroTrainer:
 
         # Graceful shutdown handler
         signal.signal(signal.SIGINT, self._handle_interrupt)
+
+    def _data_contract(self):
+        contract = dict(rollout_mode=self.rollout_mode, depth=self.depth, max_turns=self.max_turns,
+                        value_target="terminal_only", observation_version="live_public_v2")
+        root = Path(__file__).resolve().parents[1]
+        contract["encoder_sha256"] = hashlib.sha256((root/'models/embeddings.py').read_bytes()).hexdigest()
+        if self.rollout_backend == "showdown":
+            contract["observer_sha256"] = hashlib.sha256((root/'client/showdown_bot.py').read_bytes()).hexdigest()
+            contract["bridge_sha256"] = hashlib.sha256((root/'evaluation/showdown_bridge.cjs').read_bytes()).hexdigest()
+        if self.rollout_backend == "showdown":
+            from glaubermon.evaluation.training_teams import TRAINING_TEAMS
+            contract["showdown_version"] = json.loads(Path(self.showdown_path, 'package.json').read_text())['version']
+            contract["training_pool_sha256"] = hashlib.sha256(json.dumps(TRAINING_TEAMS,sort_keys=True).encode()).hexdigest()
+        return contract
 
     def _load_checkpoint_if_exists(self):
         """Load weights explicitly; incompatible files must not silently train a random net."""
@@ -173,12 +213,17 @@ class AlphaZeroTrainer:
         if source != self.latest_ckpt:
             print("New experiment: original training counters are not copied.")
             return
+        if not os.path.exists(self.meta_path):
+            raise FileNotFoundError("Output checkpoint has no provenance metadata; choose a new output directory")
         if os.path.exists(self.meta_path):
             with open(self.meta_path, "r") as f:
                 meta = json.load(f)
-            if meta.get("rollout_mode") != "sampled_internal_v1_experimental":
+            if meta.get("rollout_mode") != self.rollout_mode:
                 raise ValueError("Checkpoint counters use another rollout mode; choose a new --checkpoint-dir.")
+            if meta.get("data_contract") != self._data_contract():
+                raise ValueError("Training data contract changed; choose a new --checkpoint-dir")
             self.total_games = meta.get("total_games", 0)
+            self.total_samples = meta.get("total_samples", 0)
             self.total_turns = meta.get("total_turns", 0)
             self.elapsed_offset = meta.get("elapsed_time_seconds", 0.0)
             self.mechanics_seed = meta.get("mechanics_seed", self.mechanics_seed)
@@ -191,7 +236,19 @@ class AlphaZeroTrainer:
             milestone_path = os.path.join(self.checkpoint_dir, f"glaubermon_rebel_{self.total_games}g.pt")
             torch.save(self.model.state_dict(), milestone_path)
         meta = {
-            "rollout_mode": "sampled_internal_v1_experimental",
+            "rollout_mode": self.rollout_mode,
+            "data_contract": self._data_contract(),
+            "total_samples": self.total_samples,
+            "rollout_backend": self.rollout_backend,
+            "observation_source": "live_ShowdownBot_player_channel" if self.rollout_backend == "showdown" else "privileged_internal_truth_experimental",
+            "truncation_value_target": "missing_masked",
+            "max_turns": self.max_turns,
+            "depth": self.depth,
+            "showdown_version": json.loads(Path(self.showdown_path, 'package.json').read_text())['version'] if self.rollout_backend == 'showdown' else None,
+            "last_game": self.last_game_info,
+            "torch_version": torch.__version__,
+            "device": str(self.device),
+            "torch_threads": torch.get_num_threads(),
             "evaluator": "hybrid_0.60",
             "mechanics_seed": self.mechanics_seed,
             "total_games": self.total_games,
@@ -223,23 +280,43 @@ class AlphaZeroTrainer:
 
     def play_self_play_game(self) -> List[Tuple]:
         """Play one full self-play match using SubgameResolver search."""
+        if self.rollout_backend == "showdown":
+            from glaubermon.evaluation.official_self_play import collect_game
+            seed = self.mechanics_seed + self.total_games
+            random.seed(seed)
+            np.random.seed(seed)
+            torch.manual_seed(seed)
+            self.model.eval()
+            # Separate training pool. Frozen benchmark teams must not be used here.
+            from glaubermon.evaluation.training_teams import TRAINING_TEAMS
+            keys = list(TRAINING_TEAMS)
+            team_rng = random.Random(seed)
+            teams = [team_rng.choice(keys), team_rng.choice(keys)]
+            trace_dir = Path(self.checkpoint_dir) / 'rollouts'
+            trace_dir.mkdir(exist_ok=True)
+            trace = trace_dir / f"game-{self.total_games:06d}.jsonl"
+            samples, self.last_game_info = asyncio.run(collect_game(
+                self.model, self.showdown_path, teams, [seed % 65536, 19283, 38475, 29384],
+                depth=self.depth, max_turns=self.max_turns, trace_path=trace,
+                team_pool=TRAINING_TEAMS))
+            return samples
         state = generate_competitive_battle()
         trajectory = []
         self.model.eval()  # train_step enables dropout; search must disable it again.
         rng = random.Random(self.mechanics_seed + self.total_games)
 
-        for turn in range(35):
+        for turn in range(self.max_turns):
             if state.is_game_over:
                 break
 
             state_tensors = encode_battle_state(state)
 
             # Solve for P1
-            act1, p1_strat, actions1, _ = self.resolver.resolve_turn(state, depth=1, sample=True)
+            act1, p1_strat, actions1, _ = self.resolver.resolve_turn(state, depth=self.depth, sample=True)
 
             # Solve for P2 (perspective inverted)
             inv_state = replace(state, p1=state.p2, p2=state.p1)
-            act2, _, _, _ = self.resolver.resolve_turn(inv_state, depth=1, sample=True)
+            act2, _, _, _ = self.resolver.resolve_turn(inv_state, depth=self.depth, sample=True)
 
             # Encode search policy distribution into exact 14-dim action logit targets
             target_policy = np.zeros(14, dtype=np.float32)
@@ -260,8 +337,9 @@ class AlphaZeroTrainer:
         elif state.winner == 2:
             outcome = -1.0
         else:
-            # Domain-grounded terminal score on turn cap (material, HP, hazards)
-            outcome = float(HeuristicEvaluator().evaluate(state))
+            outcome = 0.0 if state.is_game_over else None
+        self.last_game_info = dict(terminated=state.is_game_over, winner=state.winner,
+                                   turns=len(trajectory), samples=len(trajectory))
 
         # Pair trajectory states with outcome
         game_data = []
@@ -278,7 +356,7 @@ class AlphaZeroTrainer:
         self.model.train()
 
         p1_m_list, p1_s_list, p2_m_list, p2_s_list, f_list = [], [], [], [], []
-        val_targets, policy_targets = [], []
+        val_targets, policy_targets, value_mask = [], [], []
 
         for state_tensors, target_policy, outcome in batch:
             (p1_m, p1_s), (p2_m, p2_s), field = state_tensors
@@ -287,7 +365,8 @@ class AlphaZeroTrainer:
             p2_m_list.append(p2_m)
             p2_s_list.append(p2_s)
             f_list.append(field)
-            val_targets.append(outcome)
+            value_mask.append(outcome is not None)
+            val_targets.append(0.0 if outcome is None else outcome)
             policy_targets.append(torch.tensor(target_policy, dtype=torch.float32))
 
         p1_m_b = torch.stack(p1_m_list).to(self.device, non_blocking=True)
@@ -298,10 +377,12 @@ class AlphaZeroTrainer:
         v_targets_b = torch.tensor(val_targets, dtype=torch.float32, device=self.device).unsqueeze(-1)
         p_targets_b = torch.stack(policy_targets).to(self.device, non_blocking=True)
 
-        self.optimizer.zero_grad()
+        v_mask = torch.tensor(value_mask, dtype=torch.bool, device=self.device)
+        self.optimizer.zero_grad(set_to_none=True)
         with torch.amp.autocast("cuda" if torch.cuda.is_available() else "cpu"):
             pred_v, pred_p = self.model(p1_m_b, p1_s_b, p2_m_b, p2_s_b, f_b)
-            loss_v = self.value_loss_fn(pred_v, v_targets_b)
+            # No value-head update (including weight decay) on wholly truncated batches.
+            loss_v = self.value_loss_fn(pred_v[v_mask], v_targets_b[v_mask]) if v_mask.any() else pred_p.new_zeros(())
             loss_p = self.policy_loss_fn(pred_p, p_targets_b)
             loss = loss_v + loss_p
 
@@ -347,7 +428,7 @@ class AlphaZeroTrainer:
 
         return wins / max(1, num_games)
 
-    def train(self, games_to_play: int = 1000, save_every: int = 10, eval_every: int = 25):
+    def train(self, games_to_play: int = 1000, save_every: int = 10, eval_every: int = 0):
         target_games = self.total_games + games_to_play
         print("=" * 75)
         print("  GLAUBERMON MAX: ALPHAZERO SELF-PLAY REINFORCEMENT LEARNING")
@@ -364,7 +445,8 @@ class AlphaZeroTrainer:
             for s in samples:
                 self.replay_buffer.push(*s)
             self.total_games += 1
-            self.total_turns += len(samples)
+            self.total_samples += len(samples)
+            self.total_turns += self.last_game_info.get("turns", len(samples))
             pbar.update(1)
 
             # 2. Train network on experience replay buffer
@@ -377,7 +459,7 @@ class AlphaZeroTrainer:
                 self.save_checkpoint()
 
             # 4. Periodic Arena Benchmark vs Baseline
-            if self.total_games % eval_every == 0:
+            if eval_every and self.rollout_backend == "internal-privileged" and self.total_games % eval_every == 0:
                 win_rate = self.evaluate_vs_baseline(num_games=4)
                 print(f"\n[Arena Benchmark @ Game {self.total_games}] Winrate vs Heuristic Baseline: {win_rate * 100:.1f}%\n")
 
@@ -390,12 +472,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Glaubermon Max AlphaZero / ReBeL Self-Play Trainer")
     parser.add_argument("--games", type=int, default=500, help="Target total games to reach")
     parser.add_argument("--save-every", type=int, default=10, help="Save model every N games")
-    parser.add_argument("--eval-every", type=int, default=25, help="Run arena evaluation every N games")
+    parser.add_argument("--eval-every", type=int, default=0, help="Experimental internal diagnostic only; official evaluation is a separate frozen run")
     parser.add_argument("--from-scratch", action="store_true", help="Train from scratch without loading prior weights")
-    parser.add_argument("--checkpoint-dir", default="runs/rebel-corrections", help="Separate output directory; original checkpoints stay intact")
-    parser.add_argument("--mechanics-seed", type=int, default=0, help="Seed for sampled mechanics; does not seed team generation or policy sampling")
+    parser.add_argument("--checkpoint-dir", default="runs/rebel-official-v2", help="Separate output directory; original checkpoints stay intact")
+    parser.add_argument("--mechanics-seed", type=int, default=0, help="Seed for official mechanics, teams, policy sampling and model initialization")
+    parser.add_argument("--rollout-backend", choices=["showdown", "internal-privileged"], default="showdown")
+    parser.add_argument("--showdown-path", help="Path to pinned pokemon-showdown npm package")
+    parser.add_argument("--max-turns", type=int, default=300)
+    parser.add_argument("--depth", type=int, default=1)
     args = parser.parse_args()
 
     trainer = AlphaZeroTrainer(checkpoint_dir=args.checkpoint_dir, reset_from_scratch=args.from_scratch,
-                              mechanics_seed=args.mechanics_seed)
+                              mechanics_seed=args.mechanics_seed, rollout_backend=args.rollout_backend,
+                              showdown_path=args.showdown_path, max_turns=args.max_turns, depth=args.depth)
     trainer.train(games_to_play=args.games, save_every=args.save_every, eval_every=args.eval_every)

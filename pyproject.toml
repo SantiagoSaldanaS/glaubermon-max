@@ -28,3 +28,6 @@ dev = [
 
 [tool.setuptools.packages.find]
 include = ["glaubermon*"]
+
+[tool.setuptools.package-data]
+"glaubermon.evaluation" = ["*.cjs", "requirements.txt"]

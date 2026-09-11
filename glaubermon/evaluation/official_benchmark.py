@@ -26,40 +26,7 @@ from poke_env.player import SimpleHeuristicsPlayer
 from glaubermon.client.showdown_bot import ShowdownBot, PACKED_TEAMS
 
 
-class CapturedSocket:
-    def __init__(self):
-        self.messages = []
-
-    async def send(self, message):
-        self.messages.append(message)
-
-
-def choice_text(message):
-    command = message.split('|/', 1)[-1].lstrip('/')
-    return command.removeprefix('choose ')
-
-
-class OfficialBridge:
-    def __init__(self, showdown):
-        self.process = subprocess.Popen(
-            ['node', str(Path(__file__).with_name('showdown_bridge.cjs')), str(Path(showdown).resolve())],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-
-    def exchange(self, message):
-        self.process.stdin.write(json.dumps(message) + '\n')
-        self.process.stdin.flush()
-        line = self.process.stdout.readline()
-        if not line:
-            raise RuntimeError('Official simulator exited')
-        result = json.loads(line)
-        if 'fatal' in result:
-            raise RuntimeError(result['fatal'])
-        return result
-
-    def close(self):
-        self.process.stdin.close()
-        self.process.wait(timeout=10)
-        self.process.stdout.close()
+from glaubermon.evaluation.showdown_transport import OfficialBridge, CapturedSocket, choice_text
 
 
 async def play_game(args, game_id, mode, out):
@@ -74,7 +41,7 @@ async def play_game(args, game_id, mode, out):
     np.random.seed(args.seed + game_id)
     torch.manual_seed(args.seed + game_id)
     bot = ShowdownBot(username='Glaubermon', depth=args.depth, team=team_names[bot_side],
-                      checkpoint=args.checkpoint, stealth=False, evaluator=mode)
+                      checkpoint=args.checkpoint, stealth=False, evaluator=mode, load_config=False)
     forward_count = [0]
     def count_forward(*unused):
         forward_count[0] += 1
@@ -180,6 +147,8 @@ def run_job(args, game, mode, out):
 
 
 async def main(args):
+    if args.games < 2 or args.games % 2:
+        raise ValueError("Paired benchmark requires a positive even number of games")
     if Path('showdown_config.json').exists():
         raise RuntimeError('Run in isolated checkout without showdown_config.json')
     out = Path(args.output)

@@ -139,10 +139,12 @@ class ShowdownBot:
         ladder: bool = False,
         ladder_matches: int = 5,
         stealth: bool = True,
-        evaluator: str = "hybrid"
+        evaluator: str = "hybrid",
+        model: Optional[torch.nn.Module] = None,
+        load_config: bool = True
     ):
         config_path = "showdown_config.json"
-        if os.path.exists(config_path):
+        if load_config and os.path.exists(config_path):
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
                     cfg = json.load(f)
@@ -195,9 +197,13 @@ class ShowdownBot:
 
         # Load Neural & Heuristic Evaluators into HybridEvaluator
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = GlaubermonMaxNet(d_model=256, nhead=8, num_actions=14).to(self.device)
-        ckpt_loaded = False
-        if checkpoint and os.path.exists(checkpoint):
+        self.model = model if model is not None else GlaubermonMaxNet(d_model=256, nhead=8, num_actions=14).to(self.device)
+        if model is not None:
+            self.device = next(model.parameters()).device
+        ckpt_loaded = model is not None
+        if model is not None:
+            self.model.eval()
+        elif checkpoint and os.path.exists(checkpoint):
             self.model.load_state_dict(torch.load(checkpoint, map_location=self.device))
             logger.info(f"Loaded AlphaZero/ReBeL weights from {checkpoint}")
             ckpt_loaded = True
@@ -248,6 +254,7 @@ class ShowdownBot:
         self.room_weather: Dict[str, Weather] = {}                         # room -> Weather enum
         self.room_terrain: Dict[str, Terrain] = {}                         # room -> Terrain enum
         self.last_rqid: Dict[str, int] = {}
+        self.room_turn: Dict[str, int] = {}
         self.active_rooms: set = set()
 
     def get_current_packed_team(self) -> str:
@@ -429,6 +436,9 @@ class ShowdownBot:
                 self.deducer.parse_line(line)
             except Exception:
                 pass
+
+            if room and command == "turn" and len(parts) > 2:
+                self.room_turn[room] = int(parts[2])
 
             # 3a. Handle Player Identity
             if room and command == "player" and len(parts) > 3:
@@ -973,7 +983,7 @@ class ShowdownBot:
             else:
                 item = None
 
-            if len(moves) < 4 and matching:
+            if not moves and matching:
                 moves = matching[0].moves
 
             # Boosts and Status
@@ -1167,7 +1177,7 @@ class ShowdownBot:
 
         weather = self.room_weather.get(room, Weather.NONE)
         terrain = self.room_terrain.get(room, Terrain.NONE)
-        return BattleState(p1=p1_side, p2=p2_side, weather=weather, terrain=terrain)
+        return BattleState(p1=p1_side, p2=p2_side, weather=weather, terrain=terrain, turn=self.room_turn.get(room, 1))
 
     def select_lead_order(self, room: str, req: Optional[Dict] = None) -> str:
         """Dynamically evaluate opponent team preview to select the optimal starting lead.
@@ -1380,6 +1390,10 @@ class ShowdownBot:
                 switches_only = [a for a in current_actions if a.action_type == ActionType.SWITCH]
                 if switches_only:
                     p1_actions_override = switches_only
+
+        if req.get("active", [{}])[0].get("trapped"):
+            p1_actions_override = [a for a in (p1_actions_override if p1_actions_override is not None else state.get_valid_actions(1))
+                                   if a.action_type == ActionType.MOVE]
 
         # Solve simultaneous extensive-form turn using AlphaZero Neural Net & Nash Equilibrium (non-blocking thread)
         can_tera = req.get("active", [{}])[0].get("canTerastallize", False)
