@@ -190,3 +190,24 @@ def test_perspective_flip_preserves_trap_sources_and_pending_queue(references):
  from_second=simulate_turn_transition(flipped,None,SwitchAction(2,'Blissey')).flipped()
  assert from_first==from_second
  assert phase.p1.active_index==0
+
+
+def test_all_replacement_options_are_evaluated_in_one_batch(references):
+ import numpy as np
+ from glaubermon.search.subgame_resolver import SubgameResolver
+ state=from_snapshot(references['faint_replacement_does_not_give_free_attack']['before'])
+ state.p2.pokemon.append(state.p2.pokemon[1].clone())
+ state.p2.pokemon[-1].species='Chansey'
+ state.p2.pokemon[-1].current_hp=50
+ phase=simulate_turn_transition(state,MoveAction('seismictoss',1),MoveAction('splash',1))
+ class BatchOnly:
+  def __init__(self):self.sizes=[]
+  def evaluate_batch(self,states):
+   self.sizes.append(len(states))
+   return np.array([-child.p2.active_pokemon.hp_percent for child in states])
+  def evaluate(self,state):raise AssertionError('Expected one batched evaluation')
+ evaluator=BatchOnly();resolver=SubgameResolver(evaluator)
+ result=resolver._resolve_replacements(phase,0,False,True)
+ assert evaluator.sizes==[2]
+ assert len(result[6])==2 and result[4].target_slot==2
+ assert result[3]==-1.0

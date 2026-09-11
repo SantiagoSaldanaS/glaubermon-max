@@ -765,6 +765,7 @@ class SubgameResolver:
         actions1 = state.get_valid_actions(1) if 1 in state.pending_switches else [None]
         actions2 = state.get_valid_actions(2) if 2 in state.pending_switches else [None]
         matrix = np.zeros((len(actions1),len(actions2)))
+        leaves,leaf_coords = [],[]
         for i,a1 in enumerate(actions1):
             for j,a2 in enumerate(actions2):
                 child = simulate_turn_transition(state,a1,a2)
@@ -775,7 +776,14 @@ class SubgameResolver:
                 elif depth > 0:
                     value = self.resolve_turn(child,depth=depth,sample=False)[3]
                 else:
-                    value = self.evaluator.evaluate(child)
+                    leaves.append(child)
+                    leaf_coords.append((i,j))
+                    continue
+                matrix[i,j] = value
+        if leaves:
+            values = (self.evaluator.evaluate_batch(leaves) if hasattr(self.evaluator,"evaluate_batch")
+                      else [self.evaluator.evaluate(child) for child in leaves])
+            for (i,j),value in zip(leaf_coords,values):
                 matrix[i,j] = value
         pi1,pi2,value = solve_zero_sum_game(matrix)
         i = int(np.random.choice(len(pi1),p=pi1)) if sample else int(np.argmax(pi1))
