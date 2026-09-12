@@ -66,3 +66,19 @@ def test_wellspring_public_tera_counts_only_authoritative_boost():
  asyncio.run(b.handle_message('>'+room+'\n|switch|p2a: Ogerpon|Ogerpon-Wellspring-Tera|100/100\n|-boost|p2a: Ogerpon|spd|1|[from] ability: Embody Aspect'))
  m=b.build_battle_state(room,request()).p2.active_pokemon
  assert m.boosts['spd']==1 and m.ability=='embodyaspectwellspring'
+
+
+def test_forced_replacement_does_not_consume_future_tera():
+ from glaubermon.core.actions import SwitchAction
+ from glaubermon.search.subgame_resolver import simulate_turn_transition
+ b=bot();room='battle-replacement-tera';req=request()
+ req.pop('active');req['forceSwitch']=[True]
+ req['side']['pokemon'][0]['condition']='0 fnt'
+ bench=dict(req['side']['pokemon'][0]);bench.update(ident='p1: Blissey',details='Blissey',active=False,condition='100/651',moves=['splash'],ability='naturalcure',teraType='Water')
+ req['side']['pokemon'].append(bench)
+ state=b.build_battle_state(room,req)
+ assert not state.p1.is_tera_used
+ after=simulate_turn_transition(state,SwitchAction(2,'Blissey'),None)
+ assert any(getattr(a,'is_tera',False) for a in after.get_valid_actions(1))
+ b.our_tera_used[room]=True
+ assert b.build_battle_state(room,req).p1.is_tera_used

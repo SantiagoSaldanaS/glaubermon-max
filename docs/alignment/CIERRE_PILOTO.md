@@ -12,10 +12,10 @@ Cuando falta historial, los PP y la fuente de una activación se marcan como des
 
 Tienen contraste directo con Showdown: Protosynthesis/Quark Drive, Body Press, Protean, Roost, Thunderclap, Water Absorb, Flash Fire y Lum Berry; teracristalización y reentrada de Ogerpon-Wellspring; cadenas de modificadores de Wellspring Mask, Black Glasses, Supreme Overlord, Vessel of Ruin, Multiscale y Life Orb; combinaciones de Choice Band/Specs y Paradox; orden de cambios simultáneos con Drizzle, Booster Energy y Dauntless Shield.
 
-Pendiente: cerrar la revisión explícita de todas las entradas del inventario, vinculando cada una con evidencia de regresión o pruebas diferenciales. La aparición de un nombre en el código no basta para certificar la regla ni todas sus interacciones.
+Revisión explícita cerrada en [pilot-coverage.json](pilot-coverage.json): 57 comparaciones de movimientos con los sets reales y evidencia específica para las 16 habilidades y 13 objetos. No se certifican todas las interacciones posibles fuera de estos equipos.
 
 ## 3. Comprobación conjunta y salida
 
-Comparar trayectorias oficiales de todos los arquetipos fijados con las decisiones legales y transiciones de la búsqueda. Separar diferencias por información oculta/aleatoriedad de errores deterministas de reglas. Las discrepancias deterministas relevantes deben quedar corregidas y convertidas en regresiones. Completar partidas por el adaptador real a profundidad 2 sin acciones inválidas, fallbacks ni timeouts; registrar código, pesos, semillas y trazas.
+Cinco trayectorias completas con resultados aleatorios fijados coinciden de principio a fin, incluidos los menús legales; 292 fases y 248 turnos. Las discrepancias encontradas quedaron corregidas y cubiertas por regresiones. Las pruebas de distribuciones siguen separadas, y la incertidumbre de observaciones públicas no se sustituye por información privada. Completar partidas por el adaptador real a profundidad 2 sin acciones inválidas, fallbacks ni timeouts; registrar código, pesos, semillas y trazas.
 
 Solo después de cerrar estos puntos se revisa `training_allowed`. El primer entrenamiento crea otro experimento/checkpoint; no sustituye los respaldos. La calidad del checkpoint nuevo se evalúa después con el control congelado. Superar Metamon/PokéChamp y la evaluación de ladder son hitos posteriores.

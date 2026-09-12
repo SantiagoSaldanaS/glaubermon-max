@@ -6,6 +6,14 @@ Instrucción de Felipe/Santiago: corregir las diferencias de entorno antes de re
 
 El cierre se limita a los equipos actuales: [criterios y pendientes concretos](CIERRE_PILOTO.md). El inventario fijado incluye 57 movimientos, 16 habilidades y 13 objetos. Las mecánicas ajenas a esos sets ya no bloquean por sí mismas este primer piloto.
 
+## Cierre: cobertura y trayectorias completas
+
+- Los 57 movimientos tienen una comparación individual usando el usuario, objeto, habilidad y estadísticas del equipo fijado. La matriz [pilot-coverage.json](pilot-coverage.json) vincula también las 16 habilidades y 13 objetos con pruebas específicas.
+- Cinco partidas controladas recorren 292 fases/248 turnos en total, alcanzan un resultado terminal real y coinciden en HP, PP, estados, boosts, objetos, tipos, habilidades, campos, reemplazos y menús legales. Los resultados aleatorios se fijan explícitamente en ambos motores para aislar reglas; estas cinco partidas no se contabilizan como partidas de integración normal ni como evidencia de rendimiento.
+- El recorrido encontró y corrigió: redondeo de recoil de Brave Bird; bajada de evasión y lado de pantallas de Defog; limpieza de tipo/Tera al debilitarse; consumo de PP y acciones propias cuando el objetivo desaparece por recoil. Flower Trick conserva su crítico garantizado también en consultas de daño de búsqueda determinista. Un request de reemplazo ya no marca Tera como gastado por carecer del menú de ataques.
+- Suite completa: **568 pruebas aprobadas**. Total: **26,431 ejecuciones oficiales controladas**, incluyendo las cinco trayectorias completas y dos familias adicionales de críticos. La ruta de entrenamiento verifica backend oficial, versión, esquema, equipos y fingerprints del código antes de iniciar rollouts.
+- Queda únicamente repetir integración con pesos congelados sobre este commit antes de habilitar el piloto acotado. El entrenamiento sigue sin iniciarse.
+
 ## Séptima tanda: modificadores, Ogerpon y entradas simultáneas
 
 - Wellspring Mask y Black Glasses modifican potencia base; la máscara aumenta también Horn Leech y Play Rough. Supreme Overlord usa el modificador fijo de potencia correspondiente a 0–5 aliados caídos, junto con Black Glasses.

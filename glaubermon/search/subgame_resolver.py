@@ -145,6 +145,9 @@ def finalized_state(state):
                 mon.boosts = {stat:0 for stat in mon.boosts}
                 mon.booster_stat = None
                 mon.choice_locked_move = None
+                mon.last_move = None
+                mon.type_override = None
+                mon.is_terastallized = False
     return state
 
 
@@ -303,7 +306,8 @@ def simulate_turn_transition(
 
         if attacker is not selected_users[player]:
             continue  # A Pokémon dragged out before its turn cannot pass its move to the replacement.
-        if attacker and not attacker.is_fainted and defender and not defender.is_fainted:
+        if s.is_game_over:break
+        if attacker and not attacker.is_fainted and defender:
             execution_priority = move_priority(attacker,move)
             if move.id != "struggle":
                 forced = attacker.volatiles.get("encore",{}).get("move")
@@ -379,11 +383,17 @@ def simulate_turn_transition(
             # Misses and failed moves consume PP; being KO'd before acting does not.
             # Deduct the selected move, not a move called by Sleep Talk.
             if selected.id != "struggle":
-                cost = 1 + int(clean_key(defender.ability) == "pressure" and selected.target in (
+                cost = 1 + int(not defender.is_fainted and clean_key(defender.ability) == "pressure" and selected.target in (
                     "normal", "allAdjacentFoes", "allAdjacent", "any", "randomNormal", "foeSide"))
                 selected.pp = max(0, selected.pp - cost)
 
             if sleep_talk_failed:
+                moved_players.add(player)
+                continue
+
+            if defender.is_fainted and move.target in ("normal", "allAdjacentFoes", "allAdjacent", "any", "randomNormal"):
+                # A target can disappear via recoil before this queued attempt.
+                # The attempt still consumes PP; self/field moves can still act.
                 moved_players.add(player)
                 continue
 
@@ -543,7 +553,7 @@ def simulate_turn_transition(
                     # Recoil moves: recoil by exact canonical ratio or standard fraction
                     if actual_dmg > 0 and clean_key(attacker.ability) not in ("rockhead","magicguard") and getattr(move, "recoil", None):
                         num, den = move.recoil
-                        attacker.take_damage(max(1, actual_dmg * num // den))
+                        attacker.take_damage(max(1, (2*actual_dmg*num+den)//(2*den)))
                     elif actual_dmg > 0 and clean_key(attacker.ability) not in ("rockhead","magicguard") and m_id in ("bravebird", "flareblitz", "woodhammer", "wavecrash", "doubleedge"):
                         attacker.take_damage(max(1, actual_dmg // 3))
                     elif actual_dmg > 0 and clean_key(attacker.ability) not in ("rockhead","magicguard") and m_id in ("headsmash",):
@@ -713,9 +723,13 @@ def simulate_turn_transition(
                 target_side = (s.p1 if player == "p1" else s.p2) if is_magic_bounce else (s.p2 if player == "p1" else s.p1)
                 target_side.hazards[Hazard.SPIKES_1] = min(3, target_side.hazards.get(Hazard.SPIKES_1, 0) + 1)
             elif m_id == "defog":
+                target = attacker if is_magic_bounce else defender
+                source = defender if is_magic_bounce else attacker
+                if "substitute" not in target.volatiles or clean_key(source.ability) == "infiltrator":
+                    target.boosts["evasion"] = max(-6,target.boosts.get("evasion",0)-1)
                 s.p1.hazards.clear()
                 s.p2.hazards.clear()
-                (s.p2 if player=="p1" else s.p1).screens.clear()
+                (s.p1 if (player=="p1")==is_magic_bounce else s.p2).screens.clear()
                 s.terrain = Terrain.NONE
                 s.terrain_turns = 0
             elif m_id in ("uturn", "voltswitch", "flipturn"):

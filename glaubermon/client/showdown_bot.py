@@ -1152,7 +1152,7 @@ class ShowdownBot:
                 p2_active_idx = i
 
         can_tera = bool(req.get("active", [{}])[0].get("canTerastallize", False)) if req.get("active") else False
-        p1_tera_used = self.our_tera_used.get(room, False) or (not can_tera)
+        p1_tera_used = self.our_tera_used.get(room, False) or (bool(req.get("active")) and not can_tera)
         for p in side_pokemon:
             if p.get("terastallized"):
                 p1_tera_used = True

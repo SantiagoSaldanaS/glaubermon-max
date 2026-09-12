@@ -8,6 +8,17 @@ from glaubermon.core.types import ActionType
 from glaubermon.search.subgame_resolver import simulate_turn_transition
 
 
+class ControlledDraws:
+ """Known middle damage roll, no sub-50% proc, first categorical choice."""
+ def random(self):return .5
+ def randrange(self,n):return n//2
+ def randint(self,a,b):return a+(b-a+1)//2
+ def choice(self,values):
+  if len(values)==16 and all(isinstance(v,(int,float)) for v in values):return values[7] # official random(16)=8 -> 92%
+  if len(values)==20 and set(values)=={2,3,4,5}:return 3
+  return values[0]
+
+
 def team(species='Snorlax',moves=None,**kwargs):
  return dict(species=species,moves=moves or ['Splash'],**kwargs)
 
@@ -80,25 +91,27 @@ def normalize_volatiles(mon,state):
 
 @pytest.mark.parametrize('case',CASES,ids=lambda c:c['name'])
 def test_volatile_and_phase_trajectory(case,references):
- ref=references[case['name']];state=from_snapshot(ref['before'])
- for choices,expected in zip(case.get('actions',[['move 1','move 1']]),ref['results']):
+ ref=references[case['name']];state=from_snapshot(ref['before']);previous=ref['before']
+ for choices,expected in zip(ref.get('choices',case.get('actions',[['move 1','move 1']])),ref['results']):
   actions=[]
   for side_idx,(side,command) in enumerate(zip((state.p1,state.p2),choices)):
    if not command: actions.append(None);continue
    tokens=command.split();kind,slot=tokens[:2];slot=int(slot)
    if kind=='switch':
-    exp_side=expected['sides'][side_idx]
-    species=exp_side['mons'][exp_side['active']]['species']
+    species=previous['sides'][side_idx]['mons'][slot-1]['species']
     index=next(i for i,p in enumerate(side.pokemon) if p.species==species)
     actions.append(SwitchAction(index+1,species))
-   else: actions.append(MoveAction('struggle' if not any(m.pp for m in side.active_pokemon.moves) or (case.get('refresh_disabled') and not any(getattr(a,'move_id','struggle') != 'struggle' for a in state.get_valid_actions(side_idx+1))) else side.active_pokemon.moves[slot-1].id,slot,is_tera='terastallize' in tokens))
-  state=simulate_turn_transition(state,*actions,sample_outcomes=True,rng=random.Random(17))
+   else: actions.append(MoveAction('struggle' if not any(m.pp for m in side.active_pokemon.moves) or ((case.get('refresh_disabled') or case.get('controlled_draws')) and not any(getattr(a,'move_id','struggle') != 'struggle' for a in state.get_valid_actions(side_idx+1))) else side.active_pokemon.moves[slot-1].id,slot,is_tera='terastallize' in tokens))
+  state=simulate_turn_transition(state,*actions,sample_outcomes=True,rng=ControlledDraws() if case.get('controlled_draws') else random.Random(17),tie_winner='p1' if case.get('controlled_draws') else None)
   for actual,exp in zip((state.p1,state.p2),expected['sides']):
+   if case.get('compare_legal') and not expected.get('ended'):
+    legal={("move",a.move_id,a.is_tera) if a.action_type==ActionType.MOVE else ("switch",a.species,False) for a in state.get_valid_actions(1 if actual is state.p1 else 2)}
+    assert legal=={tuple(a) for a in exp['legal']},(case['name'],expected['turn'],legal,exp['legal'])
    assert actual.active_pokemon.species==exp['mons'][exp['active']]['species']
    assert actual.hazards == from_snapshot(expected).__getattribute__('p1' if actual is state.p1 else 'p2').hazards
    for m in exp['mons']:
     ours=next(p for p in actual.pokemon if p.species==m['species'])
-    assert ours.current_hp==m['hp'], (case['name'],choices,ours.species,ours.current_hp,m['hp'])
+    assert ours.current_hp==m['hp'], (case['name'],choices,expected['turn'],ours.species,ours.current_hp,m['hp'])
     if m['hp'] > 0: assert ours.status==STATUS[m['status']]
     if case.get('compare_last_move') and m['hp']>0:assert ours.last_move==m['lastMove']
     if case.get('compare_ability'):assert (ours.ability or '').lower().replace(' ','').replace('-','')==m['ability']
@@ -111,6 +124,7 @@ def test_volatile_and_phase_trajectory(case,references):
     assert normalize_volatiles(ours,state)==m['volatiles']
   assert state.pending_switches==tuple(expected['pending'])
   assert state.turn==expected['turn']
+  previous=expected
   field=from_snapshot(expected)
   assert (state.weather,state.weather_turns,state.terrain,state.terrain_turns)==(field.weather,field.weather_turns,field.terrain,field.terrain_turns)
 

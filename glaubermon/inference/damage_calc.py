@@ -95,6 +95,12 @@ def calculate_damage_rolls(
     """Calculate all 16 discrete damage rolls for a move in Gen 9."""
     m_id = move.id.lower().replace(" ", "").replace("-", "")
 
+    # Guaranteed critical moves must also be critical in deterministic search.
+    if clean_key(defender.ability) in ("battlearmor","shellarmor"):
+        is_critical = False
+    elif move.will_crit:
+        is_critical = True
+
     weather = effective_weather(weather,attacker,defender)
     # Standalone damage queries may not have a BattleState activation callback.
     if not attacker.booster_stat and paradox_environment(attacker,weather,terrain):

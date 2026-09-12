@@ -437,9 +437,8 @@ class AlphaZeroTrainer:
         return wins / max(1, num_games)
 
     def train(self, games_to_play: int = 1000, save_every: int = 10, eval_every: int = 0):
-        alignment = Path(__file__).resolve().parents[2] / "docs/ALIGNMENT_STATUS.json"
-        if not alignment.exists() or not json.loads(alignment.read_text()).get("training_allowed",False):
-            raise RuntimeError("Training paused pending environment alignment; see docs/ALIGNMENT_STATUS.json")
+        from glaubermon.evaluation.alignment_gate import require_pilot_alignment
+        require_pilot_alignment(getattr(self,"rollout_backend",None),getattr(self,"showdown_path",None))
         target_games = self.total_games + games_to_play
         print("=" * 75)
         print("  GLAUBERMON MAX: ALPHAZERO SELF-PLAY REINFORCEMENT LEARNING")
