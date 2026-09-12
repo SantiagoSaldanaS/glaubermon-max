@@ -1,4 +1,4 @@
-> **Reentrenamiento pausado:** la alineación con Showdown sigue abierta. Consultar [estado y pruebas](docs/alignment/ESTADO.md) antes de ejecutar el entrenador.
+> **Piloto habilitado para los cinco equipos validados.** Entrega con los comandos completos para NVIDIA: [docs/ENTRENAR_GPU.md](docs/ENTRENAR_GPU.md). La validación local fue en CPU; el checkpoint nuevo todavía debe entrenarse y evaluarse. Ver [estado y pruebas](docs/alignment/ESTADO.md).
 
 > Estado de las correcciones y comandos del piloto oficial: [docs/TRAINING_CORRECTIONS.md](docs/TRAINING_CORRECTIONS.md). El entrenamiento actual usa observaciones del cliente y resultados de Showdown; el motor interno sigue siendo experimental. Los checkpoints originales se conservan.
 

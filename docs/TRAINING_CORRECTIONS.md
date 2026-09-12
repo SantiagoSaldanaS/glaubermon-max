@@ -1,4 +1,4 @@
-> Prioridad actual (11 de septiembre): **alinear los entornos antes de reentrenar**. El entrenamiento está pausado por código. Ver [estado de alineación](alignment/ESTADO.md). Los pilotos descritos debajo son anteriores a esta pausa.
+> **Cierre actualizado:** el piloto acotado está habilitado; usar los comandos de [ENTRENAR_GPU.md](ENTRENAR_GPU.md). Ver [estado de alineación](alignment/ESTADO.md). Las pruebas de entrenamiento, los comandos y cifras descritos debajo son históricos, anteriores a las últimas correcciones; no son evidencia de reentrenamiento del código final.
 
 # Estado actual: correcciones, entrenamiento oficial y piloto externo
 
