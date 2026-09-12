@@ -83,9 +83,9 @@ class GlaubermonMaxNet(nn.Module):
         self.cross_attn1 = CrossAttentionBlock(d_model, nhead=nhead, dim_feedforward=d_model * 2)
         self.cross_attn2 = CrossAttentionBlock(d_model, nhead=nhead, dim_feedforward=d_model * 2)
 
-        # 5. Field Encoder: 16 -> d_model
+        # 5. Field Encoder: 40 public features -> d_model
         self.field_fc = nn.Sequential(
-            nn.Linear(16, d_model),
+            nn.Linear(40, d_model),
             nn.GELU(),
             nn.Linear(d_model, d_model),
             nn.LayerNorm(d_model)
@@ -116,9 +116,33 @@ class GlaubermonMaxNet(nn.Module):
             nn.Linear(128, num_actions)
         )
 
+    def load_compatible_state_dict(self, weights):
+        """Import a legacy field encoder with zero weights on added public inputs.
+
+        Original checkpoint bytes stay unchanged. No fabricated knowledge is added;
+        only future training can learn to use these new neural features.
+        """
+        weights = dict(weights)
+        old_move = weights.get("move_fc.0.weight")
+        if old_move is not None and old_move.shape[1] == 32:
+            weights["move_fc.0.weight"] = torch.nn.functional.pad(old_move,(0,MOVE_DIM-32))
+        old = weights.get("field_fc.0.weight")
+        if old is not None and old.shape[1] == 16:
+            weights["field_fc.0.weight"] = torch.nn.functional.pad(old,(0,24))
+        old_mon = weights.get("mon_projector.0.weight")
+        expected = self.mon_projector[0].in_features
+        if old_mon is not None and old_mon.shape[1] in (128+64,128+68,128+83):
+            weights["mon_projector.0.weight"] = torch.nn.functional.pad(old_mon,(0,expected-old_mon.shape[1]))
+            if old_mon.shape[1] == 128+64 and "field_fc.0.weight" in weights:
+                weights["field_fc.0.weight"] = weights["field_fc.0.weight"].clone()
+                weights["field_fc.0.weight"][:,37:40] = 0
+        return self.load_state_dict(weights)
+
     def _encode_team(self, moves_t: torch.Tensor, stats_t: torch.Tensor) -> torch.Tensor:
         # moves_t: (batch, 6, 4, MOVE_DIM)
         # stats_t: (batch, 6, STAT_DIM)
+        if moves_t.shape[-1] == 32:
+            moves_t = torch.nn.functional.pad(moves_t,(0,MOVE_DIM-32))
         b, num_mons, num_moves, m_dim = moves_t.shape
 
         # Encode moves and pool across the 4 moves
@@ -128,6 +152,8 @@ class GlaubermonMaxNet(nn.Module):
         m_pooled = m_pooled.view(b, num_mons, -1)
 
         # Concatenate move embeddings with rich Pokémon stat vector
+        if stats_t.shape[-1] in (64,68,83):
+            stats_t = torch.nn.functional.pad(stats_t,(0,STAT_DIM-stats_t.shape[-1]))
         mon_features = torch.cat([m_pooled, stats_t], dim=-1)  # (batch, 6, move_emb_dim + STAT_DIM)
         mon_tokens = self.mon_projector(mon_features)  # (batch, 6, d_model)
 
@@ -172,6 +198,8 @@ class GlaubermonMaxNet(nn.Module):
         p2_pooled = torch.mean(p2_attended, dim=1)  # (batch, d_model)
 
         # 4. Field conditions
+        if field.shape[-1] == 16:  # Explicit legacy input, missing public fields.
+            field = torch.nn.functional.pad(field, (0,24))
         field_emb = self.field_fc(field)  # (batch, d_model)
 
         # 5. Global state fusion

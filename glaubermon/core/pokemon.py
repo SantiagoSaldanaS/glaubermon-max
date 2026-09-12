@@ -1,5 +1,6 @@
 """Detailed state representation for individual Pokémon and Moves."""
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any
 from glaubermon.core.types import PokemonType, MoveCategory, StatusCondition, Hazard
@@ -28,6 +29,31 @@ class Move:
     recoil: Optional[Tuple[int, int]] = None
     boosts: Optional[Dict[str, int]] = None
     self_boosts: Optional[Dict[str, int]] = None
+    target: str = "normal"
+    always_hits: bool = False
+    crit_ratio: int = 1
+    will_crit: bool = False
+    blocked_by_protect: bool = True
+    secondaries: List[Dict] = field(default_factory=list)
+    defrost: bool = False
+    sleep_usable: bool = False
+    sleep_talk_callable: bool = True
+    bypass_substitute: bool = False
+    volatile_status: Optional[str] = None
+    multihit: Any = None
+    multiaccuracy: bool = False
+    fail_encore: bool = False
+    request_disabled: bool = False
+    pp_known: bool = True
+
+    def clone(self) -> "Move":
+        """Copy mutable battle data without reloading or reinterpreting the Dex."""
+        result = object.__new__(type(self))
+        result.__dict__ = self.__dict__.copy()
+        result.secondaries = deepcopy(self.secondaries) if self.secondaries else []
+        result.boosts = dict(self.boosts) if self.boosts is not None else None
+        result.self_boosts = dict(self.self_boosts) if self.self_boosts is not None else None
+        return result
 
     @classmethod
     def create(
@@ -50,12 +76,20 @@ class Move:
         recoil: Optional[Tuple[int, int]] = None,
         boosts: Optional[Dict[str, int]] = None,
         self_boosts: Optional[Dict[str, int]] = None,
+        target: Optional[str] = None,
+        always_hits: Optional[bool] = None,
+        crit_ratio: Optional[int] = None,
+        will_crit: Optional[bool] = None,
+        blocked_by_protect: Optional[bool] = None,
     ) -> "Move":
         move_id = clean_key(name)
-        if pp is None or is_contact is None or is_protect is None:
+        secondary_meta = {}
+        if any(value is None for value in (pp, is_contact, is_protect, target, always_hits,
+                                          crit_ratio, will_crit, blocked_by_protect)):
             try:
                 from glaubermon.data.showdown_dex import ShowdownDex
                 dex_m = ShowdownDex.get_instance().get_move(move_id)
+                secondary_meta = {k:deepcopy(getattr(dex_m,k)) for k in ("secondaries","defrost","sleep_usable","sleep_talk_callable","bypass_substitute","volatile_status","multihit","multiaccuracy","fail_encore")}
                 if pp is None:
                     pp = dex_m.pp
                 if max_pp is None:
@@ -80,6 +114,16 @@ class Move:
                     boosts = dex_m.boosts
                 if self_boosts is None:
                     self_boosts = dex_m.self_boosts
+                if target is None:
+                    target = dex_m.target
+                if always_hits is None:
+                    always_hits = dex_m.always_hits
+                if crit_ratio is None:
+                    crit_ratio = dex_m.crit_ratio
+                if will_crit is None:
+                    will_crit = dex_m.will_crit
+                if blocked_by_protect is None:
+                    blocked_by_protect = dex_m.blocked_by_protect
             except Exception:
                 pass
 
@@ -102,7 +146,13 @@ class Move:
             drain=drain,
             recoil=recoil,
             boosts=boosts,
-            self_boosts=self_boosts
+            self_boosts=self_boosts,
+            target="normal" if target is None else target,
+            always_hits=False if always_hits is None else always_hits,
+            crit_ratio=1 if crit_ratio is None else crit_ratio,
+            will_crit=False if will_crit is None else will_crit,
+            blocked_by_protect=True if blocked_by_protect is None else blocked_by_protect,
+            **secondary_meta,
         )
 
     @classmethod
@@ -133,7 +183,12 @@ class Pokemon:
     protect_streak: int = 0
     booster_stat: Optional[str] = None
     choice_locked_move: Optional[str] = None
+    last_move: Optional[str] = None
+    move_history_incomplete: bool = False
+    type_override: Optional[Tuple[PokemonType, Optional[PokemonType]]] = None
+    protean_used: bool = False
     raw_stats: Dict[str, int] = field(default_factory=dict)
+    volatiles: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         # 1. Fill species types if uninitialized and species exists in Dex
@@ -195,7 +250,15 @@ class Pokemon:
     def active_types(self) -> Tuple[PokemonType, Optional[PokemonType]]:
         if self.is_terastallized and self.tera_type:
             return (self.tera_type, None)
-        return self.types
+        return self.pretera_types
+
+    @property
+    def pretera_types(self):
+        types = self.type_override or self.types
+        if "roost" in self.volatiles:
+            remaining = [t for t in types if t is not None and t != PokemonType.FLYING]
+            return (remaining[0], remaining[1] if len(remaining)>1 else None) if remaining else (PokemonType.NORMAL,None)
+        return types
 
     def get_booster_boosted_stat(self) -> Optional[str]:
         """Determine which stat is heightened by Protosynthesis or Quark Drive."""
@@ -206,49 +269,31 @@ class Pokemon:
         if item_clean != "boosterenergy":
             return None
 
-        candidates = ["atk", "def", "spa", "spd", "spe"]
-        best_stat = "atk"
-        best_val = -1
-        for s in candidates:
-            val = self.raw_stats.get(s, 100)
-            if val > best_val:
-                best_val = val
-                best_stat = s
-        return best_stat
+        from glaubermon.core.field_mechanics import best_paradox_stat
+        return best_paradox_stat(self)
 
-    def effective_stat(self, stat_name: str, ignore_boosts: bool = False) -> int:
+    def effective_stat(self, stat_name: str, ignore_boosts: bool = False, extra_mods=()) -> int:
         """Compute the current in-battle stat value including stage boosts, items, and abilities."""
         base = self.raw_stats.get(stat_name, 100)
         stage = 0 if ignore_boosts else self.boosts.get(stat_name, 0)
         mult = STAT_STAGE_MULTIPLIERS.get(stage, 1.0)
         stat = int(base * mult)
 
-        # Protosynthesis / Quark Drive booster calculation
         boosted = self.booster_stat or self.get_booster_boosted_stat()
-        if boosted == stat_name:
-            if stat_name == "spe":
-                stat = int(stat * 1.5)
-            else:
-                stat = int(stat * 1.3)
-
         item_clean = clean_key(self.item)
         if stat_name == "spe":
-            if self.status == StatusCondition.PARALYSIS:
-                stat = int(stat * 0.5)
-            if item_clean == "choicescarf":
-                stat = int(stat * 1.5)
-        elif stat_name == "atk":
-            if item_clean == "choiceband":
-                stat = int(stat * 1.5)
-        elif stat_name == "spa":
-            if item_clean == "choicespecs":
-                stat = int(stat * 1.5)
-        elif stat_name == "def":
-            if item_clean == "eviolite":
-                stat = int(stat * 1.5)
-        elif stat_name == "spd":
-            if item_clean in ("assaultvest", "eviolite"):
-                stat = int(stat * 1.5)
+            if boosted == "spe":stat = int(stat*1.5)
+            if self.status == StatusCondition.PARALYSIS:stat //= 2
+            if item_clean == "choicescarf":stat = int(stat*1.5)
+        else:
+            mods=[]
+            if boosted == stat_name:mods.append(5325)
+            if (stat_name,item_clean) in (("atk","choiceband"),("spa","choicespecs"),("def","eviolite"),("spd","assaultvest"),("spd","eviolite")):
+                mods.append(6144)
+            mods.extend(extra_mods)
+            modifier=4096
+            for mod in mods:modifier=(modifier*mod+2048)//4096
+            stat=(stat*modifier+2047)//4096
 
         return max(1, stat)
 
@@ -293,17 +338,17 @@ class Pokemon:
             t1, t2 = self.active_types
             eff = get_type_effectiveness(PokemonType.ROCK, t1, t2)
             fraction = 0.125 * eff
-            total_dmg += int(self.max_hp * fraction)
+            total_dmg += max(1,int(self.max_hp * fraction)) if eff else 0
 
         # Spikes (grounded check: Flying type, Levitate, Air Balloon)
         if self.is_grounded():
             spikes_lvl = hazards.get(Hazard.SPIKES_1, 0)
             if spikes_lvl == 1:
-                total_dmg += int(self.max_hp / 8)
+                total_dmg += max(1,self.max_hp // 8)
             elif spikes_lvl == 2:
-                total_dmg += int(self.max_hp / 6)
+                total_dmg += max(1,self.max_hp // 6)
             elif spikes_lvl >= 3:
-                total_dmg += int(self.max_hp / 4)
+                total_dmg += max(1,self.max_hp // 4)
 
         return total_dmg
 
@@ -315,23 +360,11 @@ class Pokemon:
         return self.current_hp <= dmg
 
     def clone(self) -> "Pokemon":
-        """Fast shallow/deep copy for simulation branching."""
-        return Pokemon(
-            species=self.species,
-            level=self.level,
-            types=self.types,
-            max_hp=self.max_hp,
-            current_hp=self.current_hp,
-            status=self.status,
-            status_turns=self.status_turns,
-            item=self.item,
-            ability=self.ability,
-            tera_type=self.tera_type,
-            is_terastallized=self.is_terastallized,
-            protect_streak=self.protect_streak,
-            booster_stat=self.booster_stat,
-            choice_locked_move=self.choice_locked_move,
-            moves=list(self.moves),
-            boosts=dict(self.boosts),
-            raw_stats=dict(self.raw_stats)
-        )
+        """Isolate branches, preserving runtime flags without running __post_init__."""
+        result = object.__new__(type(self))
+        result.__dict__ = self.__dict__.copy()
+        result.moves = [move.clone() for move in self.moves]
+        result.boosts = dict(self.boosts)
+        result.raw_stats = dict(self.raw_stats)
+        result.volatiles = deepcopy(self.volatiles)
+        return result

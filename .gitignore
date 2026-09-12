@@ -7,6 +7,8 @@ __pycache__/
 env/
 venv/
 .venv/
+runs/
+*.egg-info/
 
 # Testing & Caches
 .pytest_cache/
@@ -32,3 +34,8 @@ scratch_*.txt
 test_cand_script.py
 test_turn26.py
 test_vtm.py
+
+node_modules/
+
+build/
+dist/

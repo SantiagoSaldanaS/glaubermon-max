@@ -1,8 +1,9 @@
 """Full 6v6 Battle State Representation."""
 
 from dataclasses import dataclass, field
+from copy import deepcopy
 from typing import Dict, List, Optional
-from glaubermon.core.types import Weather, Terrain, Hazard, ActionType
+from glaubermon.core.types import Weather, Terrain, Hazard, ActionType, MoveCategory, PokemonType
 from glaubermon.core.pokemon import Pokemon
 from glaubermon.core.actions import Action, MoveAction, SwitchAction
 from glaubermon.core.constants import clean_key
@@ -62,6 +63,15 @@ class BattleState:
     terrain_turns: int = 0
     turn: int = 1
     trick_room: int = 0
+    pending_switches: tuple = ()
+    continuation: Optional[dict] = None
+
+    def is_trapped(self, player: int) -> bool:
+        side = self.p1 if player == 1 else self.p2
+        mon = side.active_pokemon
+        if not mon or mon.is_fainted or PokemonType.GHOST in mon.active_types or clean_key(mon.item) == "shedshell":
+            return False
+        return any(key in mon.volatiles for key in ("partiallytrapped", "trapped", "request_trapped"))
 
     @property
     def is_game_over(self) -> bool:
@@ -81,7 +91,9 @@ class BattleState:
         active = side.active_pokemon
         actions: List[Action] = []
 
-        if active is None or active.is_fainted:
+        if self.pending_switches and player not in self.pending_switches:
+            return []  # This player is waiting, not selecting another move.
+        if player in self.pending_switches or active is None or active.is_fainted:
             # Must switch
             for slot in side.available_switches():
                 actions.append(SwitchAction(target_slot=slot + 1, species=side.pokemon[slot].species))
@@ -93,7 +105,14 @@ class BattleState:
         locked_m = active.choice_locked_move if is_choice else None
 
         for i, move in enumerate(active.moves):
-            if move.pp > 0:
+            if move.pp > 0 and not move.request_disabled and not active.move_history_incomplete:
+                if "taunt" in active.volatiles and move.category == MoveCategory.STATUS and move.id != "mefirst":
+                    continue
+                if active.volatiles.get("disable",{}).get("move") == move.id:
+                    continue
+                encored = active.volatiles.get("encore",{}).get("move")
+                if encored and encored != move.id:
+                    continue
                 if locked_m and clean_key(move.id) != clean_key(locked_m):
                     continue
                 actions.append(MoveAction(
@@ -110,14 +129,41 @@ class BattleState:
                         tera_type=active.tera_type
                     ))
 
+        # Exhausted/Choice-locked moves still allow Struggle, even with a bench.
+        if not actions:
+            actions.append(MoveAction(move_id="struggle", move_slot=1))
+
         # 2. Switch actions
-        for slot in side.available_switches():
+        for slot in ([] if self.is_trapped(player) else side.available_switches()):
             actions.append(SwitchAction(
                 target_slot=slot + 1,
                 species=side.pokemon[slot].species
             ))
 
         return actions
+
+    def flipped(self) -> "BattleState":
+        """Change player perspective, including source-bound and queued state."""
+        result = self.clone()
+        result.p1,result.p2 = result.p2,result.p1
+        result.pending_switches = tuple(sorted(3-i for i in result.pending_switches))
+        for side in (result.p1,result.p2):
+            for mon in side.pokemon:
+                source_side = mon.volatiles.get("leechseed",{}).get("source_side")
+                if source_side:mon.volatiles["leechseed"]["source_side"] = 3-source_side
+                for key in ("trapped","partiallytrapped"):
+                    source = mon.volatiles.get(key,{}).get("source")
+                    if source:
+                        mon.volatiles[key]["source"] = (3-source[0],source[1])
+        continuation = result.continuation
+        if continuation:
+            flip = lambda player: "p2" if player == "p1" else "p1"
+            continuation["users"] = {flip(who):index for who,index in continuation["users"].items()}
+            continuation["order"] = [(flip(who),slot,move) for who,slot,move in continuation["order"]]
+            continuation["moved"] = [flip(who) for who in continuation["moved"]]
+            continuation["flinched"] = [flip(who) for who in continuation["flinched"]]
+            continuation["m1"],continuation["m2"] = continuation["m2"],continuation["m1"]
+        return result
 
     def clone(self) -> "BattleState":
         return BattleState(
@@ -128,5 +174,7 @@ class BattleState:
             terrain=self.terrain,
             terrain_turns=self.terrain_turns,
             turn=self.turn,
-            trick_room=self.trick_room
+            trick_room=self.trick_room,
+            pending_switches=tuple(self.pending_switches),
+            continuation=deepcopy(self.continuation),
         )

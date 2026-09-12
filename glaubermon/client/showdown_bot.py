@@ -139,10 +139,12 @@ class ShowdownBot:
         ladder: bool = False,
         ladder_matches: int = 5,
         stealth: bool = True,
-        evaluator: str = "hybrid"
+        evaluator: str = "hybrid",
+        model: Optional[torch.nn.Module] = None,
+        load_config: bool = True
     ):
         config_path = "showdown_config.json"
-        if os.path.exists(config_path):
+        if load_config and os.path.exists(config_path):
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
                     cfg = json.load(f)
@@ -195,10 +197,14 @@ class ShowdownBot:
 
         # Load Neural & Heuristic Evaluators into HybridEvaluator
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = GlaubermonMaxNet(d_model=256, nhead=8, num_actions=14).to(self.device)
-        ckpt_loaded = False
-        if checkpoint and os.path.exists(checkpoint):
-            self.model.load_state_dict(torch.load(checkpoint, map_location=self.device))
+        self.model = model if model is not None else GlaubermonMaxNet(d_model=256, nhead=8, num_actions=14).to(self.device)
+        if model is not None:
+            self.device = next(model.parameters()).device
+        ckpt_loaded = model is not None
+        if model is not None:
+            self.model.eval()
+        elif checkpoint and os.path.exists(checkpoint):
+            self.model.load_compatible_state_dict(torch.load(checkpoint, map_location=self.device))
             logger.info(f"Loaded AlphaZero/ReBeL weights from {checkpoint}")
             ckpt_loaded = True
         else:
@@ -244,10 +250,17 @@ class ShowdownBot:
         self.side_hazards: Dict[str, Dict[str, Dict[Hazard, int]]] = {}   # room -> side_tag -> {hazard: count}
         self.mon_status: Dict[str, Dict[str, StatusCondition]] = {}       # room -> species -> status
         self.protect_streaks: Dict[str, Dict[str, int]] = {}              # room -> species -> streak count
-        self.active_booster: Dict[str, Dict[str, str]] = {}               # room -> species -> boosted_stat ("atk", "spe", etc.)
+        self.active_booster: Dict[str, Dict[tuple, str]] = {}  # room -> (side, species) -> stat
         self.room_weather: Dict[str, Weather] = {}                         # room -> Weather enum
         self.room_terrain: Dict[str, Terrain] = {}                         # room -> Terrain enum
         self.last_rqid: Dict[str, int] = {}
+        self.room_turn: Dict[str, int] = {}
+        self.public_fields = {}
+        self.public_volatiles = {}
+        self.own_move_history = {}
+        self.active_species_by_side = {}
+        self.revealed_items = {}
+        self.revealed_abilities = {}
         self.active_rooms: set = set()
 
     def get_current_packed_team(self) -> str:
@@ -318,6 +331,13 @@ class ShowdownBot:
                 continue
 
             command = parts[1]
+            if room:
+                from glaubermon.client.field_tracker import PublicFieldTracker
+                self.public_fields.setdefault(room, PublicFieldTracker()).ingest(parts)
+                from glaubermon.client.volatile_tracker import PublicVolatileTracker
+                self.public_volatiles.setdefault(room, PublicVolatileTracker()).ingest(parts)
+                from glaubermon.client.own_move_history import OwnMoveHistory
+                self.own_move_history.setdefault(room,OwnMoveHistory(self.dex)).ingest(parts)
 
             # 1. Handle Login Challenge String
             if command == "challstr":
@@ -424,11 +444,25 @@ class ShowdownBot:
                     except json.JSONDecodeError:
                         pass
 
+            if room and len(parts)>3 and command == "-ability":
+                ident = parts[2]
+                spec = self.ident_to_species.get(room,{}).get(ident,ident.split(":")[-1].strip())
+                self.revealed_abilities.setdefault(room,{})[(ident[:2],spec)] = clean_key(parts[3])
+            if room and any(p.startswith("[from] ability: ") for p in parts):
+                ident = next((p.removeprefix("[of] ") for p in parts if p.startswith("[of] ")), parts[2])
+                if ident.startswith(("p1", "p2")):
+                    spec = self.ident_to_species.get(room,{}).get(ident,ident.split(":")[-1].strip())
+                    ability = next(p.split("ability: ",1)[1] for p in parts if p.startswith("[from] ability: "))
+                    self.revealed_abilities.setdefault(room,{})[(ident[:2],spec)] = clean_key(ability)
+
             # Forward to LogDeducer
             try:
                 self.deducer.parse_line(line)
             except Exception:
                 pass
+
+            if room and command == "turn" and len(parts) > 2:
+                self.room_turn[room] = int(parts[2])
 
             # 3a. Handle Player Identity
             if room and command == "player" and len(parts) > 3:
@@ -449,13 +483,12 @@ class ShowdownBot:
 
                 if room not in self.ident_to_species:
                     self.ident_to_species[room] = {}
-                old_mon = self.ident_to_species[room].get(ident)
-                if old_mon:
-                    # Showdown resets boosts upon switching
-                    if room in self.opp_boosts and old_mon in self.opp_boosts[room]:
-                        self.opp_boosts[room][old_mon] = {}
-                    if room in self.our_boosts and old_mon in self.our_boosts[room]:
-                        self.our_boosts[room][old_mon] = {}
+                previous = self.active_species_by_side.setdefault(room,{}).get(side_tag)
+                self.active_species_by_side[room][side_tag] = mon_name
+                boosts_store = self.our_boosts if side_tag==self.our_side.get(room,"p1") else self.opp_boosts
+                for species in (previous,mon_name):
+                    if species:
+                        boosts_store.setdefault(room,{})[species] = {}
                 if room in self.protect_streaks and side_tag in self.protect_streaks[room]:
                     for k in self.protect_streaks[room][side_tag]:
                         self.protect_streaks[room][side_tag][k] = 0
@@ -495,22 +528,10 @@ class ShowdownBot:
                     self.our_tera_used[room] = True
                     logger.info(f"[{room}] Our {spec} Terastallized to: {tera_type}")
 
-                # Embody Aspect immediately grants a stat boost upon Terastallization
-                spec_clean = clean_key(spec)
-                if "ogerpon" in spec_clean:
-                    boost_dict = self.our_boosts if (self.our_side.get(room) == side_tag) else self.opp_boosts
-                    if room not in boost_dict:
-                        boost_dict[room] = {}
-                    if spec not in boost_dict[room]:
-                        boost_dict[room][spec] = {}
-                    if "hearthflame" in spec_clean:
-                        boost_dict[room][spec]["atk"] = min(6, boost_dict[room][spec].get("atk", 0) + 1)
-                    elif "cornerstone" in spec_clean:
-                        boost_dict[room][spec]["def"] = min(6, boost_dict[room][spec].get("def", 0) + 1)
-                    elif "wellspring" in spec_clean:
-                        boost_dict[room][spec]["spd"] = min(6, boost_dict[room][spec].get("spd", 0) + 1)
-                    else:
-                        boost_dict[room][spec]["spe"] = min(6, boost_dict[room][spec].get("spe", 0) + 1)
+                # Stat boosts arrive as authoritative -boost events.
+                if "ogerpon" in clean_key(spec):
+                    form=next((f for f in ("wellspring","hearthflame","cornerstone") if f in clean_key(spec)),"teal")
+                    self.revealed_abilities.setdefault(room,{})[(side_tag,spec)]="embodyaspect"+form
 
             elif room and command == "poke" and len(parts) > 3:
                 side_tag = parts[2].strip()
@@ -624,10 +645,8 @@ class ShowdownBot:
             elif room and command in ("-clearboost",) and len(parts) > 2:
                 ident = parts[2].strip()
                 spec = self.ident_to_species.get(room, {}).get(ident, ident.split(":")[-1].strip())
-                if room in self.opp_boosts and spec in self.opp_boosts[room]:
-                    self.opp_boosts[room][spec] = {}
-                if room in self.our_boosts and spec in self.our_boosts[room]:
-                    self.our_boosts[room][spec] = {}
+                store = self.our_boosts if ident[:2]==self.our_side.get(room,"p1") else self.opp_boosts
+                store.setdefault(room,{})[spec] = {}
 
             elif room and command == "-sidestart" and len(parts) > 3:
                 side_ident = parts[2].strip()
@@ -674,18 +693,24 @@ class ShowdownBot:
                 cond = st_map.get(st_str, StatusCondition.NONE)
                 if room not in self.mon_status:
                     self.mon_status[room] = {}
-                self.mon_status[room][spec] = cond
+                self.mon_status[room][(ident[:2],spec)] = cond
                 logger.info(f"[{room}] Status applied to {spec}: {cond.name}")
 
             elif room and command == "-curestatus" and len(parts) > 2:
                 ident = parts[2].strip()
                 spec = self.ident_to_species.get(room, {}).get(ident, ident.split(":")[-1].strip())
                 if room in self.mon_status:
-                    self.mon_status[room][spec] = StatusCondition.NONE
+                    self.mon_status[room][(ident[:2],spec)] = StatusCondition.NONE
 
             elif room and command in ("-enditem", "-item") and len(parts) > 3:
                 ident = parts[2].strip()
                 item_name = parts[3].strip().lower()
+                spec = self.ident_to_species.get(room,{}).get(ident,ident.split(":")[-1].strip())
+                self.revealed_items.setdefault(room,{})[(ident[:2],spec)] = item_name if command == "-item" else None
+                if command == "-item":
+                    for store in (self.p1_popped_items,self.opp_popped_items):
+                        for key in (spec,normalize_species_key(spec),clean_key(spec)):
+                            store.get(room,set()).discard(key)
                 side_tag = ident[:2]
                 our_side = self.our_side.get(room)
                 if our_side and side_tag == our_side:
@@ -715,7 +740,7 @@ class ShowdownBot:
                         if s_name in effect:
                             if room not in self.active_booster:
                                 self.active_booster[room] = {}
-                            self.active_booster[room][spec] = s_name
+                            self.active_booster[room][(ident[:2], spec)] = s_name
                             logger.info(f"[{room}] Booster Volatile Active on {spec}: {s_name.upper()} boosted!")
                             break
 
@@ -724,24 +749,16 @@ class ShowdownBot:
                 effect = parts[3].strip().lower()
                 spec = clean_species_name(self.ident_to_species.get(room, {}).get(ident, ident.split(":")[-1].strip()))
                 if "protosynthesis" in effect or "quarkdrive" in effect:
-                    if room in self.active_booster and spec in self.active_booster[room]:
-                        del self.active_booster[room][spec]
+                    if room in self.active_booster and (ident[:2], spec) in self.active_booster[room]:
+                        del self.active_booster[room][(ident[:2], spec)]
                         logger.info(f"[{room}] Booster Volatile Expired on {spec}")
 
             elif room and command == "-weather" and len(parts) > 2:
                 w_str = parts[2].strip().lower()
-                if "none" in w_str:
-                    w_enum = Weather.NONE
-                elif "sun" in w_str:
-                    w_enum = Weather.SUN
-                elif "rain" in w_str:
-                    w_enum = Weather.RAIN
-                elif "sand" in w_str:
-                    w_enum = Weather.SANDSTORM
-                elif "snow" in w_str or "hail" in w_str:
-                    w_enum = Weather.SNOW
-                else:
-                    w_enum = Weather.NONE
+                w_enum = {"none":Weather.NONE,"sunnyday":Weather.SUN,"raindance":Weather.RAIN,
+                          "sandstorm":Weather.SANDSTORM,"snow":Weather.SNOW,"hail":Weather.SNOW,
+                          "desolateland":Weather.HARSH_SUN,"primordialsea":Weather.HEAVY_RAIN,
+                          "deltastream":Weather.STRONG_WINDS}.get(w_str,Weather.NONE)
                 self.room_weather[room] = w_enum
                 logger.info(f"[{room}] Weather updated to: {w_enum.name}")
 
@@ -756,7 +773,7 @@ class ShowdownBot:
                 elif "psychic" in f_str:
                     t_enum = Terrain.PSYCHIC
                 else:
-                    t_enum = Terrain.NONE
+                    continue  # Trick Room and other fields do not clear terrain.
                 self.room_terrain[room] = t_enum
                 logger.info(f"[{room}] Terrain active: {t_enum.name}")
 
@@ -928,23 +945,9 @@ class ShowdownBot:
                     pass
 
             is_active_mon = (i == p1_active_idx)
-            m_list = active_moves if (is_active_mon and active_moves) else p.get("moves", [])
-            moves = []
-            for m in m_list:
-                # Retain all move slots in exact cartridge order so move_slot = i + 1 aligns with Showdown slots (1-4)
-                if isinstance(m, dict):
-                    m_id = m.get("id", "")
-                    move_obj = self.dex.get_move(m_id)
-                    is_dis = bool(m.get("disabled", False))
-                    pp_val = int(m.get("pp", 10))
-                    # Mark disabled moves with pp = 0 so battle_state skips them while preserving slot indices!
-                    move_obj.pp = 0 if is_dis else pp_val
-                    if "maxpp" in m:
-                        move_obj.max_pp = int(m["maxpp"])
-                    moves.append(move_obj)
-                else:
-                    m_id = str(m)
-                    moves.append(self.dex.get_move(m_id))
+            from glaubermon.client.own_move_history import OwnMoveHistory
+            history = self.own_move_history.setdefault(room,OwnMoveHistory(self.dex))
+            moves = history.observe(p, active_moves if is_active_mon else None)
 
             matching = [m for m in meta_sample if clean_key(m.species) == clean_key(spec)]
             
@@ -960,7 +963,7 @@ class ShowdownBot:
             if not tera_type:
                 tera_type = t1
 
-            ability = p.get("ability") or (matching[0].ability if matching else self.dex.get_pokemon_ability(spec))
+            ability = p.get("ability") or p.get("baseAbility") or (matching[0].ability if matching else self.dex.get_pokemon_ability(spec))
 
             # Prevent Air Balloon zombie bug: if popped in protocol or empty in request, item is None
             p_item = p.get("item", None)
@@ -973,12 +976,12 @@ class ShowdownBot:
             else:
                 item = None
 
-            if len(moves) < 4 and matching:
+            if not moves and matching:
                 moves = matching[0].moves
 
             # Boosts and Status
             boosts = dict(self.our_boosts.get(room, {}).get(spec, {}))
-            status = self.mon_status.get(room, {}).get(spec, StatusCondition.NONE)
+            status = StatusCondition.NONE
             if "brn" in cond:
                 status = StatusCondition.BURN
             elif "par" in cond:
@@ -1014,7 +1017,7 @@ class ShowdownBot:
                 cartridge_stats = dict(calc_stats)
                 cartridge_stats["hp"] = max_hp
 
-            b_stat1 = self.active_booster.get(room, {}).get(clean_species_name(spec))
+            b_stat1 = self.active_booster.get(room, {}).get((self.our_side.get(room, "p1"), clean_species_name(spec)))
             mon = Pokemon(
                 species=spec,
                 types=(t1, t2),
@@ -1068,6 +1071,9 @@ class ShowdownBot:
             opp_popped = self.opp_popped_items.get(room, set())
             if spec in opp_popped or normalize_species_key(spec) in opp_popped or clean_key(spec) in opp_popped:
                 item = None
+            public_item_key = ("p2" if self.our_side.get(room,"p1")=="p1" else "p1",spec)
+            if public_item_key in self.revealed_items.get(room,{}):
+                item = self.revealed_items[room][public_item_key]
             tera_type = meta_mon.tera_type if meta_mon else t1
 
             # Opponent Tera Isolation: ONLY the specific Pokémon that executed Terastallization is Terastallized
@@ -1079,7 +1085,10 @@ class ShowdownBot:
                     tera_type = STRING_TO_TYPE.get(self.opp_tera[room].lower(), tera_type)
 
             # Resolve Opponent Ability
-            ded_ability = self.deducer.get_or_create(spec).revealed_ability
+            ded_ability = self.revealed_abilities.get(room,{}).get(("p2" if self.our_side.get(room,"p1")=="p1" else "p1",spec))
+            if ded_ability == "embodyaspect" and "ogerpon" in clean_key(spec):
+                form=next((f for f in ("wellspring","hearthflame","cornerstone") if f in clean_key(spec)),"teal")
+                ded_ability += form
             if ded_ability:
                 ability = ded_ability
             elif meta_mon and meta_mon.ability:
@@ -1116,11 +1125,11 @@ class ShowdownBot:
                 if clean_key(b_k) == clean_key(spec) or clean_key(b_k).split("-")[0] == clean_key(spec).split("-")[0]:
                     boosts = dict(b_v)
                     break
-            status = self.mon_status.get(room, {}).get(spec, StatusCondition.NONE)
+            status = self.mon_status.get(room, {}).get(("p2" if self.our_side.get(room,"p1")=="p1" else "p1",spec), StatusCondition.NONE)
             c_spec2 = normalize_species_key(spec)
             opp_side_tag = "p2" if self.our_side.get(room, "p1") == "p1" else "p1"
             p2_streak = self.protect_streaks.get(room, {}).get(opp_side_tag, {}).get(c_spec2, 0)
-            b_stat2 = self.active_booster.get(room, {}).get(clean_species_name(spec))
+            b_stat2 = self.active_booster.get(room, {}).get((opp_side_tag, clean_species_name(spec)))
 
             mon = Pokemon(
                 species=spec,
@@ -1143,7 +1152,7 @@ class ShowdownBot:
                 p2_active_idx = i
 
         can_tera = bool(req.get("active", [{}])[0].get("canTerastallize", False)) if req.get("active") else False
-        p1_tera_used = self.our_tera_used.get(room, False) or (not can_tera)
+        p1_tera_used = self.our_tera_used.get(room, False) or (bool(req.get("active")) and not can_tera)
         for p in side_pokemon:
             if p.get("terastallized"):
                 p1_tera_used = True
@@ -1154,9 +1163,13 @@ class ShowdownBot:
         p1_hazards = dict(self.side_hazards.get(room, {}).get(our_tag, {}))
         p2_hazards = dict(self.side_hazards.get(room, {}).get(opp_tag, {}))
 
-        p1_side = BattleSide(pokemon=p1_mons, active_index=p1_active_idx, hazards=p1_hazards, is_tera_used=p1_tera_used)
+        from glaubermon.client.field_tracker import PublicFieldTracker
+        fields = self.public_fields.get(room, PublicFieldTracker())
+        p1_side = BattleSide(pokemon=p1_mons, active_index=p1_active_idx, hazards=p1_hazards, is_tera_used=p1_tera_used,
+                             screens=dict(fields.screens[our_tag]), tailwind=fields.tailwind[our_tag])
         p2_tera_used = bool(self.opp_tera.get(room))
-        p2_side = BattleSide(pokemon=p2_mons, active_index=p2_active_idx, hazards=p2_hazards, is_tera_used=p2_tera_used)
+        p2_side = BattleSide(pokemon=p2_mons, active_index=p2_active_idx, hazards=p2_hazards, is_tera_used=p2_tera_used,
+                             screens=dict(fields.screens[opp_tag]), tailwind=fields.tailwind[opp_tag])
 
         if p1_side.active_pokemon:
             act_k = normalize_species_key(p1_side.active_pokemon.species)
@@ -1165,9 +1178,36 @@ class ShowdownBot:
             opp_k = normalize_species_key(p2_side.active_pokemon.species)
             p2_side.active_pokemon.protect_streak = self.protect_streaks.get(room, {}).get(opp_tag, {}).get(opp_k, 0)
 
+        from glaubermon.client.volatile_tracker import PublicVolatileTracker
+        tracker = self.public_volatiles.get(room,PublicVolatileTracker())
+        sides = {our_tag:(1,p1_side),opp_tag:(2,p2_side)}
+        for tag,(_,side) in sides.items():
+            for mon in side.pokemon:
+                mon.volatiles = tracker.observations(tag,mon.species,sides)
+                key = (tag,clean_key(mon.species))
+                changed = tracker.type_changes.get(key)
+                if changed:
+                    mon.type_override = (PokemonType(changed[0]),PokemonType(changed[1]) if len(changed)>1 else None)
+                mon.protean_used = key in tracker.protean_used
+                mon.last_move = tracker.last_moves.get((tag,clean_key(mon.species)))
+                if tag == opp_tag:
+                    for move in mon.moves:move.pp_known = False
+                for flag in tracker.entry_once.get((tag,clean_key(mon.species)),set()):
+                    setattr(mon,flag,True)
+        if p1_side.active_pokemon and active_moves and all(m.get("id")=="struggle" for m in active_moves):
+            mon = p1_side.active_pokemon
+            # With neither PP history nor a known restriction, future availability
+            # is unknown. Keep the authoritative Struggle menu conservatively.
+            if any(not m.pp_known for m in mon.moves) and not any(k in mon.volatiles for k in ("encore","disable","taunt")):
+                mon.move_history_incomplete = True
+        if p1_side.active_pokemon and req.get("active",[{}])[0].get("trapped"):
+            p1_side.active_pokemon.volatiles["request_trapped"] = {}
+
         weather = self.room_weather.get(room, Weather.NONE)
         terrain = self.room_terrain.get(room, Terrain.NONE)
-        return BattleState(p1=p1_side, p2=p2_side, weather=weather, terrain=terrain)
+        return BattleState(p1=p1_side, p2=p2_side, pending_switches=(1,) if any(req.get("forceSwitch",[])) else (),
+                           weather=weather, terrain=terrain, turn=self.room_turn.get(room, 1), trick_room=fields.trick_room,
+                           weather_turns=-1 if weather != Weather.NONE else 0, terrain_turns=-1 if terrain != Terrain.NONE else 0)
 
     def select_lead_order(self, room: str, req: Optional[Dict] = None) -> str:
         """Dynamically evaluate opponent team preview to select the optimal starting lead.
@@ -1283,75 +1323,18 @@ class ShowdownBot:
         logger.info(f"[{room}] DEBUG P2 Active: {p2_act.species if p2_act else 'None'} (HP: {p2_act.current_hp if p2_act else 0}/{p2_act.max_hp if p2_act else 0}) [Tera Available: {not state.p2.is_tera_used}]")
         logger.info(f"[{room}] DEBUG P2 Team: {[f'{p.species}({p.current_hp}/{p.max_hp})' for p in state.p2.pokemon]}")
 
-        # Forced Switch: Evaluates face-to-face replacement state without voluntary switch penalties
-        if req.get("forceSwitch"):
-            live_switches = []
-            safe_switches = []
-            our_hazards = state.p1.hazards
-            for slot_idx, p in enumerate(req.get("side", {}).get("pokemon", [])):
-                cond = p.get("condition", "")
-                if not p.get("active", False) and "fnt" not in cond and not p.get("fainted", False):
-                    spec = p.get("details", "").split(",")[0].strip()
-                    sw_act = SwitchAction(target_slot=slot_idx + 1, species=spec)
-                    live_switches.append(sw_act)
-                    if slot_idx < len(state.p1.pokemon):
-                        mon_obj = state.p1.pokemon[slot_idx]
-                        if not mon_obj.is_dead_to_hazards(our_hazards):
-                            safe_switches.append(sw_act)
-            candidate_switches = safe_switches if safe_switches else live_switches
-            if candidate_switches:
-                best_cand = candidate_switches[0]
-                best_val = -float('inf')
-                fallen = sum(1 for p in state.p1.pokemon if p.is_fainted)
-
-                for cand in candidate_switches:
-                    slot_0 = cand.target_slot - 1
-                    s_cand = state.clone()
-                    s_cand.p1.active_index = slot_0
-                    apply_entry_hazards(s_cand, 1, slot_0)
-
-                    # Evaluate candidate on its ability to fight/attack face-to-face!
-                    # Do not allow switch actions during replacement evaluation to prevent suicidal mons
-                    # from inflating their value by claiming a defensive pivot reward for immediately fleeing!
-                    cand_moves = [a for a in s_cand.get_valid_actions(1) if a.action_type == ActionType.MOVE]
-                    moves_override = cand_moves if cand_moves else None
-
-                    _, _, _, cand_val = await asyncio.to_thread(
-                        self.resolver.resolve_turn, s_cand, 1, False, moves_override, 0, False
-                    )
-
-                    cand_mon = state.p1.pokemon[slot_0] if slot_0 < len(state.p1.pokemon) else None
-                    if cand_mon:
-                        spec_key = clean_key(cand_mon.species)
-                        # Kingambit Supreme Overlord Early Preservation:
-                        # If early game (< 3 fallen allies), preserve Kingambit for late game cleaner,
-                        # UNLESS Kingambit holds a guaranteed priority lethal revenge kill!
-                        if spec_key == "kingambit" and fallen < 3:
-                            has_priority_kill = False
-                            opp_mon = state.p2.active_pokemon
-                            if opp_mon and not opp_mon.is_fainted:
-                                for mv in cand_mon.moves:
-                                    if getattr(mv, "priority", 0) > 0 and mv.category in (MoveCategory.PHYSICAL, MoveCategory.SPECIAL):
-                                        rolls = calculate_damage_rolls(cand_mon, opp_mon, mv, state.weather, state.terrain, attacker_side=s_cand.p1)
-                                        if rolls and min(rolls) >= opp_mon.current_hp:
-                                            has_priority_kill = True
-                                            break
-                            if not has_priority_kill:
-                                cand_val -= 8.0 * (3 - fallen)
-
-                    logger.info(f"[{room}] Forced Switch Candidate Slot {cand.target_slot} ({cand.species}): Face-to-Face Value = {cand_val:.2f}")
-                    if cand_val > best_val:
-                        best_val = cand_val
-                        best_cand = cand
-
-                chosen_species = best_cand.species or "Unknown"
-                logger.info(f"[{room}] Nash Forced Switch Selected -> Slot {best_cand.target_slot} ({chosen_species}) (Best Val: {best_val:.3f})")
-                self.last_action_was_switch[room] = False
-                if self.stealth_mode:
-                    sw_delay = random.uniform(1.8, 3.5)
-                    logger.info(f"[{room}] Stealth: Simulating human switch reaction ({sw_delay:.1f}s)...")
-                    await asyncio.sleep(sw_delay)
-                await self.ws.send(f"{room}|/choose switch {best_cand.target_slot}")
+        # Public requests identify who must replace, but do not reveal an enemy's
+        # queued move. Evaluate the replacement from the public hypothesis only.
+        if any(req.get("forceSwitch", [])):
+            action, strategy, actions, value = await asyncio.to_thread(
+                self.resolver.resolve_turn, state, 1, False)
+            if action is None or action.action_type != ActionType.SWITCH:
+                raise RuntimeError("Replacement phase produced no switch")
+            self.last_action_was_switch[room] = False
+            logger.info(f"[{room}] Replacement decision: {action}, value={value:.3f}")
+            if self.stealth_mode:
+                await asyncio.sleep(random.uniform(1.8,3.5))
+            await self.ws.send(f"{room}|/choose switch {action.target_slot}")
             return
 
         p1_actions_override = None
@@ -1373,13 +1356,15 @@ class ShowdownBot:
                     p1_actions_override = filtered_actions
                 if len(legal_move_slots) == 1 and p1_act:
                     it = clean_key(p1_act.item)
-                    if it in ("choicespecs", "choiceband", "choicescarf"):
+                    if it in ("choicespecs", "choiceband", "choicescarf") and active_req_moves[legal_move_slots[0]-1].get("id") != "struggle":
                         p1_act.choice_locked_move = active_req_moves[legal_move_slots[0] - 1].get("id", "")
             else:
-                # All moves are disabled: only legal actions are switches
                 switches_only = [a for a in current_actions if a.action_type == ActionType.SWITCH]
-                if switches_only:
-                    p1_actions_override = switches_only
+                p1_actions_override = [MoveAction("struggle",1)] + switches_only
+
+        if req.get("active", [{}])[0].get("trapped"):
+            p1_actions_override = [a for a in (p1_actions_override if p1_actions_override is not None else state.get_valid_actions(1))
+                                   if a.action_type == ActionType.MOVE]
 
         # Solve simultaneous extensive-form turn using AlphaZero Neural Net & Nash Equilibrium (non-blocking thread)
         can_tera = req.get("active", [{}])[0].get("canTerastallize", False)

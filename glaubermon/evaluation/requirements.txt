@@ -1,0 +1,2 @@
+# Frozen baseline, installed alongside the main package's dependencies.
+poke-env @ git+https://github.com/hsahovic/poke-env@e3cb976d093008a0b5b8fffbc8db56c2b02ae6c2

@@ -1,0 +1,563 @@
+{
+  "purpose": "Finite pilot coverage review; not universal Showdown equivalence",
+  "reference": "pokemon-showdown@0.11.11",
+  "scope": "pilot-scope.json",
+  "moves": {
+    "aquajet": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_aquajet]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "aurasphere": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_aurasphere]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "bodypress": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_bodypress]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "bravebird": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_bravebird]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "bulkup": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_bulkup]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "calmmind": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_calmmind]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "closecombat": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_closecombat]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "crunch": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_crunch]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "defog": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_defog]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "dracometeor": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_dracometeor]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "dragondance": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_dragondance]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "earthpower": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_earthpower]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "earthquake": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_earthquake]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "extremespeed": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_extremespeed]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "flamethrower": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_flamethrower]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "flashcannon": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_flashcannon]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "flipturn": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_flipturn]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "flowertrick": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_flowertrick]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "headlongrush": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_headlongrush]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "hornleech": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_hornleech]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "hurricane": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_hurricane]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "icepunch": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_icepunch]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "icespinner": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_icespinner]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "irondefense": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_irondefense]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "ironhead": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_ironhead]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "ivycudgel": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_ivycudgel]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "knockoff": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_knockoff]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "kowtowcleave": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_kowtowcleave]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "liquidation": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_liquidation]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "magmastorm": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_magmastorm]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "makeitrain": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_makeitrain]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "moonblast": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_moonblast]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "nastyplot": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_nastyplot]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "playrough": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_playrough]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "protect": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_protect]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "rapidspin": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_rapidspin]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "recover": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_recover]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "rest": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_rest]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "roost": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_roost]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "ruination": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_ruination]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "shadowball": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_shadowball]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "sleeptalk": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_sleeptalk]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "spikes": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_spikes]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "spikyshield": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_spikyshield]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "stealthrock": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_stealthrock]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "substitute": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_substitute]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "suckerpunch": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_suckerpunch]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "surf": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_surf]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "swordsdance": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_swordsdance]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "taunt": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_taunt]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "thunderbolt": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_thunderbolt]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "thunderclap": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_thunderclap]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "toxic": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_toxic]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "tripleaxel": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_tripleaxel]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "uturn": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_uturn]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "voltswitch": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_voltswitch]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    },
+    "whirlwind": {
+      "evidence": [
+        "tests/test_pilot_inventory.py::test_every_pilot_move_transition[inventory_whirlwind]"
+      ],
+      "reviewed_behavior": "Controlled transition with actual pinned species, item, ability, moves and stats; PP, HP, stages, status, items, types, fields and replacement phase"
+    }
+  },
+  "abilities": {
+    "dauntlessshield": {
+      "reviewed_behavior": "Activation once per battle and simultaneous entries",
+      "evidence": [
+        "tests/test_volatile_phases_reference.py::test_volatile_and_phase_trajectory",
+        "tests/test_team_callbacks_reference.py::test_team_callback_trajectory"
+      ]
+    },
+    "drizzle": {
+      "reviewed_behavior": "Rain creation, Damp Rock duration, repeated and simultaneous entries",
+      "evidence": [
+        "tests/test_field_multihit_reference.py::test_field_and_multihit_trajectory",
+        "tests/test_team_callbacks_reference.py::test_team_callback_trajectory"
+      ]
+    },
+    "flashfire": {
+      "reviewed_behavior": "Fire/status absorption, persistent stat modifier and switch cleanup",
+      "evidence": [
+        "tests/test_team_callbacks_reference.py::test_team_callback_trajectory",
+        "tests/test_team_damage_modifiers.py::test_current_team_damage_support"
+      ]
+    },
+    "goodasgold": {
+      "reviewed_behavior": "Directed status immunity, Taunt/phazing and complete game effects",
+      "evidence": [
+        "tests/test_volatile_phases_reference.py::test_volatile_and_phase_trajectory",
+        "tests/test_pilot_trajectories.py::test_whole_pilot_trajectory"
+      ]
+    },
+    "infiltrator": {
+      "reviewed_behavior": "Bypass Substitute/screens and preserve directed effects",
+      "evidence": [
+        "tests/test_volatile_phases_reference.py::test_volatile_and_phase_trajectory",
+        "tests/test_pilot_trajectories.py::test_whole_pilot_trajectory"
+      ]
+    },
+    "multiscale": {
+      "reviewed_behavior": "Full HP defensive modifier combined with screens and Life Orb",
+      "evidence": [
+        "tests/test_team_damage_modifiers.py::test_current_team_damage_support"
+      ]
+    },
+    "poisonheal": {
+      "reviewed_behavior": "Toxic Orb activation and repeated poison-healing residuals in full stall trajectories",
+      "evidence": [
+        "tests/test_pilot_trajectories.py::test_whole_pilot_trajectory"
+      ]
+    },
+    "pressure": {
+      "reviewed_behavior": "Exact PP cost, no cost after source faints, own move history",
+      "evidence": [
+        "tests/test_own_move_history.py::test_pp_expenditure_pressure_called_moves_and_bench",
+        "tests/test_pilot_trajectories.py::test_whole_pilot_trajectory"
+      ]
+    },
+    "protean": {
+      "reviewed_behavior": "Once-per-entry activation, dynamic typing, STAB and protocol state",
+      "evidence": [
+        "tests/test_team_callbacks_reference.py::test_team_callback_trajectory",
+        "tests/test_pilot_trajectories.py::test_whole_pilot_trajectory"
+      ]
+    },
+    "protosynthesis": {
+      "reviewed_behavior": "Field versus item activation, stat locking, expiration, speed and damage",
+      "evidence": [
+        "tests/test_paradox_reference.py::test_activation_trajectory",
+        "tests/test_paradox_reference.py::test_paradox_damage_support",
+        "tests/test_field_multihit_reference.py::test_field_and_multihit_trajectory"
+      ]
+    },
+    "quarkdrive": {
+      "reviewed_behavior": "Terrain versus item activation, stat locking, expiration, speed and damage",
+      "evidence": [
+        "tests/test_paradox_reference.py::test_activation_trajectory",
+        "tests/test_paradox_reference.py::test_paradox_damage_support",
+        "tests/test_field_multihit_reference.py::test_field_and_multihit_trajectory"
+      ]
+    },
+    "supremeoverlord": {
+      "reviewed_behavior": "Zero through five fallen allies, fixed-point base-power combination with Black Glasses",
+      "evidence": [
+        "tests/test_team_damage_modifiers.py::test_current_team_damage_support",
+        "tests/test_pilot_trajectories.py::test_whole_pilot_trajectory"
+      ]
+    },
+    "swiftswim": {
+      "reviewed_behavior": "Rain speed with and without Trick Room; complete rain trajectories",
+      "evidence": [
+        "tests/test_field_multihit_reference.py::test_field_and_multihit_trajectory",
+        "tests/test_pilot_trajectories.py::test_whole_pilot_trajectory"
+      ]
+    },
+    "unaware": {
+      "reviewed_behavior": "Ignoring offensive/defensive stages including Body Press and critical handling",
+      "evidence": [
+        "tests/test_paradox_reference.py::test_body_press_uses_defense_with_attack_modifiers",
+        "tests/test_pilot_trajectories.py::test_whole_pilot_trajectory"
+      ]
+    },
+    "vesselofruin": {
+      "reviewed_behavior": "Special Attack modifier combined with Specs, Life Orb and Paradox",
+      "evidence": [
+        "tests/test_team_damage_modifiers.py::test_current_team_damage_support"
+      ]
+    },
+    "waterabsorb": {
+      "reviewed_behavior": "Heal before accuracy/Substitute, block pivot, lose ability on Ogerpon Tera",
+      "evidence": [
+        "tests/test_team_callbacks_reference.py::test_team_callback_trajectory",
+        "tests/test_pilot_trajectories.py::test_whole_pilot_trajectory"
+      ]
+    }
+  },
+  "items": {
+    "airballoon": {
+      "reviewed_behavior": "Ground and hazard immunity, damage popping including Substitute",
+      "evidence": [
+        "tests/test_volatile_phases_reference.py::test_volatile_and_phase_trajectory",
+        "tests/test_pilot_trajectories.py::test_whole_pilot_trajectory"
+      ]
+    },
+    "blackglasses": {
+      "reviewed_behavior": "Dark base power combined with Supreme Overlord",
+      "evidence": [
+        "tests/test_team_damage_modifiers.py::test_current_team_damage_support"
+      ]
+    },
+    "boosterenergy": {
+      "reviewed_behavior": "Consumption, field precedence, locked stat, expiration/switch",
+      "evidence": [
+        "tests/test_paradox_reference.py::test_activation_trajectory",
+        "tests/test_field_multihit_reference.py::test_field_and_multihit_trajectory"
+      ]
+    },
+    "choiceband": {
+      "reviewed_behavior": "Attack modifier including Body Press, choice lock and depleted-lock Struggle",
+      "evidence": [
+        "tests/test_team_damage_modifiers.py::test_current_team_damage_support",
+        "tests/test_pilot_trajectories.py::test_whole_pilot_trajectory"
+      ]
+    },
+    "choicescarf": {
+      "reviewed_behavior": "Speed, choice lock, Protean user and pivot reset",
+      "evidence": [
+        "tests/test_pilot_trajectories.py::test_whole_pilot_trajectory"
+      ]
+    },
+    "choicespecs": {
+      "reviewed_behavior": "Special Attack modifier, combined Vessel/Flash Fire, choice lock and Struggle",
+      "evidence": [
+        "tests/test_team_damage_modifiers.py::test_current_team_damage_support",
+        "tests/test_pilot_trajectories.py::test_whole_pilot_trajectory"
+      ]
+    },
+    "damprock": {
+      "reviewed_behavior": "Eight-turn rain and simultaneous/repeated Drizzle entries",
+      "evidence": [
+        "tests/test_field_multihit_reference.py::test_field_and_multihit_trajectory",
+        "tests/test_team_callbacks_reference.py::test_team_callback_trajectory"
+      ]
+    },
+    "heavydutyboots": {
+      "reviewed_behavior": "Blocking damage/status/stat hazards and full switch trajectories",
+      "evidence": [
+        "tests/test_volatile_phases_reference.py::test_volatile_and_phase_trajectory",
+        "tests/test_pilot_trajectories.py::test_whole_pilot_trajectory"
+      ]
+    },
+    "leftovers": {
+      "reviewed_behavior": "HP recovery, integer rounding, ordering versus status and terminal phases",
+      "evidence": [
+        "tests/test_field_multihit_reference.py::test_field_and_multihit_trajectory",
+        "tests/test_pilot_trajectories.py::test_whole_pilot_trajectory"
+      ]
+    },
+    "lifeorb": {
+      "reviewed_behavior": "Fixed-point damage, combined screens/Multiscale, recoil once per multihit",
+      "evidence": [
+        "tests/test_team_damage_modifiers.py::test_current_team_damage_support",
+        "tests/test_field_multihit_reference.py::test_field_and_multihit_trajectory"
+      ]
+    },
+    "lumberry": {
+      "reviewed_behavior": "Immediate status/confusion cure, consumption, entry and knockout exceptions",
+      "evidence": [
+        "tests/test_team_callbacks_reference.py::test_team_callback_trajectory"
+      ]
+    },
+    "toxicorb": {
+      "reviewed_behavior": "End-of-turn status activation, immunities and Poison Heal full trajectories",
+      "evidence": [
+        "tests/test_pilot_trajectories.py::test_whole_pilot_trajectory"
+      ]
+    },
+    "wellspringmask": {
+      "reviewed_behavior": "All-type base-power modifier, non-removal and Ogerpon Tera ability replacement",
+      "evidence": [
+        "tests/test_team_damage_modifiers.py::test_current_team_damage_support",
+        "tests/test_team_callbacks_reference.py::test_team_callback_trajectory",
+        "tests/test_pilot_trajectories.py::test_whole_pilot_trajectory"
+      ]
+    }
+  },
+  "joint_evidence": [
+    "tests/test_pilot_trajectories.py::test_whole_pilot_trajectory",
+    "tests/test_closure_regressions.py::test_whole_trajectory_regression",
+    "tests/test_closure_regressions.py::test_guaranteed_critical_in_damage_query"
+  ],
+  "limits": [
+    "Whole-trajectory tests couple semantic random outcomes; stochastic mechanics retain separate distribution/support tests.",
+    "Live opponent information remains estimated where Showdown hides it; coupled tests start from complete controlled states.",
+    "Changing teams, implementation fingerprints, simulator or observation schema invalidates training clearance.",
+    "No claim of SOTA, improved winrate, or a trained new checkpoint follows from mechanics parity."
+  ]
+}

@@ -251,8 +251,8 @@ def test_turn22_voluntary_switch_rejects_early_kingambit(resolver):
     assert getattr(act, 'species', '') != 'kingambit', "Must not switch to Kingambit"
 
 
-def test_turn26_great_tusk_selects_close_combat_over_rapid_spin(resolver):
-    """Against -2 Def opponent Great Tusk, Great Tusk must click Close Combat/Headlong Rush, not Rapid Spin."""
+def test_turn26_rapid_spin_preserves_the_last_replacement(resolver):
+    """Neither STAB guarantees KO; spin can save the 16-HP bench from hazards."""
     opp_tusk = Pokemon('greattusk', types=(PokemonType.GROUND, PokemonType.FIGHTING), raw_stats={'hp': 371, 'atk': 361, 'def': 301, 'spa': 127, 'spd': 142, 'spe': 273}, current_hp=363, max_hp=371, moves=[
         Move('headlongrush', 'Headlong Rush', PokemonType.GROUND, MoveCategory.PHYSICAL, 120, 1.0),
         Move('closecombat', 'Close Combat', PokemonType.FIGHTING, MoveCategory.PHYSICAL, 120, 1.0)
@@ -273,10 +273,18 @@ def test_turn26_great_tusk_selects_close_combat_over_rapid_spin(resolver):
     state = BattleState(p1=p1, p2=p2)
 
     act, strat, acts, _ = resolver.resolve_turn(state, depth=2, sample=False)
-    for a, p in zip(acts, strat):
-        if getattr(a, 'move_id', '') == 'rapidspin':
-            assert p == 0.0, f"Rapid Spin must have 0% probability, got {p}"
-    assert getattr(act, 'move_id', '') in ('closecombat', 'headlongrush'), f"Must choose powerful STAB, got {act}"
+    from glaubermon.search.subgame_resolver import simulate_turn_transition
+    from glaubermon.core.actions import MoveAction, SwitchAction
+    # The previous regression assumed automatic hazard-free replacement. Resolve
+    # the actual choice phase to demonstrate why that expectation was invalid.
+    spin = simulate_turn_transition(state,MoveAction("rapidspin",3),MoveAction("closecombat",2),tie_winner="p1")
+    combat = simulate_turn_transition(state,MoveAction("closecombat",1),MoveAction("closecombat",2),tie_winner="p1")
+    assert spin.pending_switches == combat.pending_switches == (1,)
+    spin = simulate_turn_transition(spin,SwitchAction(2,ogerpon.species),None)
+    combat = simulate_turn_transition(combat,SwitchAction(2,ogerpon.species),None)
+    assert spin.p1.active_pokemon.current_hp == 16
+    assert combat.p1.is_all_fainted
+    assert getattr(act,'move_id','') == 'rapidspin'
 
 
 def test_dragapult_choice_specs_pivots_at_minus_2_spa(resolver):
