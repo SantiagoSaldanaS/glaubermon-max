@@ -1,6 +1,6 @@
-# Alineación con Showdown: abierta; reentrenamiento pausado
+# Alineación del piloto cerrada; listo para reentrenamiento controlado
 
-Instrucción de Felipe/Santiago: corregir las diferencias de entorno antes de reentrenar. `AlphaZeroTrainer.train()` rechaza corridas mientras `docs/ALIGNMENT_STATUS.json` no permita entrenar. No se inició reentrenamiento en estas tandas; las pruebas de optimizador usan modelos desechables. Los checkpoints originales se conservan.
+Se cerró el alcance de los cinco equipos acordados con Felipe/Santiago. `docs/ALIGNMENT_STATUS.json` permite el piloto exclusivamente con rollouts oficiales, versión, esquema, equipos y código validados. `AlphaZeroTrainer.train()` rechaza cambios fuera de ese contrato. No se inició reentrenamiento en estas tandas; las pruebas de optimizador usan modelos desechables. Los ocho archivos originales coinciden con el respaldo. La equivalencia general de Showdown y la mejora de juego siguen siendo hitos distintos.
 
 ## Cierre acotado del piloto
 
@@ -12,7 +12,7 @@ El cierre se limita a los equipos actuales: [criterios y pendientes concretos](C
 - Cinco partidas controladas recorren 292 fases/248 turnos en total, alcanzan un resultado terminal real y coinciden en HP, PP, estados, boosts, objetos, tipos, habilidades, campos, reemplazos y menús legales. Los resultados aleatorios se fijan explícitamente en ambos motores para aislar reglas; estas cinco partidas no se contabilizan como partidas de integración normal ni como evidencia de rendimiento.
 - El recorrido encontró y corrigió: redondeo de recoil de Brave Bird; bajada de evasión y lado de pantallas de Defog; limpieza de tipo/Tera al debilitarse; consumo de PP y acciones propias cuando el objetivo desaparece por recoil. Flower Trick conserva su crítico garantizado también en consultas de daño de búsqueda determinista. Un request de reemplazo ya no marca Tera como gastado por carecer del menú de ataques.
 - Suite completa: **568 pruebas aprobadas**. Total: **26,431 ejecuciones oficiales controladas**, incluyendo las cinco trayectorias completas y dos familias adicionales de críticos. La ruta de entrenamiento verifica backend oficial, versión, esquema, equipos y fingerprints del código antes de iniciar rollouts.
-- Queda únicamente repetir integración con pesos congelados sobre este commit antes de habilitar el piloto acotado. El entrenamiento sigue sin iniciarse.
+- Integración final de `cab3367`: cinco partidas completas sin acciones inválidas, fallbacks ni timeouts, y 341 requests sin discrepancias en menús legales y PP activos. Con este resultado se habilita el piloto acotado. Evidencia y hashes: [pilot-closure-results.json](pilot-closure-results.json). El entrenamiento sigue sin iniciarse.
 
 ## Séptima tanda: modificadores, Ogerpon y entradas simultáneas
 
@@ -88,12 +88,12 @@ Referencia: paquete fijado **Pokémon Showdown 0.11.11**, Gen 9 custom game, con
 - Total hasta la quinta tanda: **19,141 ejecuciones oficiales**. Se comparan HP, estado, PP, boosts, objetos, volátiles, hazards, jugador que debe reemplazar y contador de turno. En los casos aleatorios se comparan soportes/frecuencias con tolerancias explícitas, no resultados idénticos por semilla: los RNG son diferentes.
 - Suite de la quinta tanda: **407 pruebas aprobadas**, incluyendo protocolo→tensores, aislamiento entre lados, compatibilidad de pesos, independencia de ramas y bloqueo de entrenamiento.
 
-Además, se completaron 29 partidas locales de integración sin acciones inválidas, fallbacks ni timeouts. Cinco corresponden a `984a42c`, incluyen los cinco equipos fijados y 341 solicitudes con menús/PP activos coincidentes. Cuatro corresponden a la quinta tanda, con movimientos de 33 características y pesos congelados (30/27 turnos de desarrollo y 21/24 de control). Cuatro corresponden a la cuarta tanda, con observaciones de 83 características y pesos congelados. Sus equipos no llevan Encore/Disable/Leech Seed: la validación mecánica proviene de fixtures. Otras cuatro corresponden a la tercera tanda: dos entre equipos de desarrollo y dos de control a profundidad 2. Triple Axel no fue elegido en esas partidas; se valida por impacto en fixtures. En la comparación histórica de la tanda anterior, la evaluación por lotes conservó las decisiones de las dos partidas comparadas y redujo el máximo observado de 26.787 a 15.534 s. Detalle y fuentes: [INTEGRACION.md](INTEGRACION.md).
+Además, se completaron 34 partidas locales de integración sin acciones inválidas, fallbacks ni timeouts. Cinco finales corresponden a `cab3367` y verifican 341 requests. Otras cinco corresponden a `984a42c`, incluyen los cinco equipos fijados y 341 solicitudes con menús/PP activos coincidentes. Cuatro corresponden a la quinta tanda, con movimientos de 33 características y pesos congelados (30/27 turnos de desarrollo y 21/24 de control). Cuatro corresponden a la cuarta tanda, con observaciones de 83 características y pesos congelados. Sus equipos no llevan Encore/Disable/Leech Seed: la validación mecánica proviene de fixtures. Otras cuatro corresponden a la tercera tanda: dos entre equipos de desarrollo y dos de control a profundidad 2. Triple Axel no fue elegido en esas partidas; se valida por impacto en fixtures. En la comparación histórica de la tanda anterior, la evaluación por lotes conservó las decisiones de las dos partidas comparadas y redujo el máximo observado de 26.787 a 15.534 s. Detalle y fuentes: [INTEGRACION.md](INTEGRACION.md).
 
 Estos fixtures controlados no certifican reglas completas de OU ni equivalencia general entre motores.
 
-## Pendiente antes de levantar la pausa
+## Siguiente hito: piloto de reentrenamiento
 
-Los pendientes que bloquean el primer piloto están enumerados en [CIERRE_PILOTO.md](CIERRE_PILOTO.md) y `docs/ALIGNMENT_STATUS.json`: completar la auditoría del inventario actual, entradas simultáneas y comparación conjunta de trayectorias. Reglas ajenas al inventario quedan diferidas.
+Los criterios de [CIERRE_PILOTO.md](CIERRE_PILOTO.md) están cerrados para el inventario fijado. El nuevo experimento debe escribir en otra carpeta, usar el backend oficial y conservar este contrato. Las señales nuevas requieren aprendizaje: adaptar columnas de un checkpoint no equivale a reentrenarlo. Después se congela el checkpoint nuevo y se compara contra el control, manteniendo equipos de evaluación separados del entrenamiento.
 
-La paridad general sigue abierta. Ninguna batería ni prueba de integración levanta automáticamente la pausa del entrenamiento.
+La paridad general sigue abierta fuera de este alcance. Metamon/PokéChamp, la ladder y cualquier afirmación de mejora requieren su evaluación posterior. Las tandas anteriores se conservan como historial y sus referencias a la pausa describen el estado de ese momento.

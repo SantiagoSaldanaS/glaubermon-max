@@ -1,11 +1,9 @@
 {
-  "training_allowed": false,
-  "reason": "Felipe/Santiago require environment alignment before another training run (2026-09-11).",
+  "training_allowed": true,
+  "reason": "Finite five-team alignment review closed: inventory, controlled complete trajectories and frozen-weight official integration passed. Clearance applies only to the pinned official pilot route.",
   "feature_schema": "public_callbacks_v7",
   "official_reference": "pokemon-showdown@0.11.11",
-  "remaining": [
-    "Final frozen-weight integration of the closure commit before enabling the scoped pilot"
-  ],
+  "remaining": [],
   "pilot_scope": "docs/alignment/pilot-scope.json",
   "deferred_outside_pilot_scope": [
     "Moves/abilities/items absent from pilot-scope.json unless triggered by the selected evaluation opponent",
@@ -51,5 +49,8 @@
     "glaubermon/scripts/train_rebel.py": "09b4f58655bf8dd2b8113c9d087e76056ec0513a14767672126efb6ca96962cf",
     "docs/alignment/pilot-coverage.json": "9b8b563f401c129f4b250053f7427fac2f02a1fb76baf13616e98c8f927c6627"
   },
-  "clearance_scope": "Controlled pilot using the pinned development training teams and official Showdown backend; no SOTA claim"
+  "clearance_scope": "Controlled pilot using the pinned development training teams and official Showdown backend; no SOTA claim",
+  "clearance_source": "cab336781b981dbbb02747c07321509bec0bcc99",
+  "evidence": "docs/alignment/pilot-closure-results.json",
+  "training_started": false
 }

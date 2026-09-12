@@ -1,0 +1,63 @@
+{
+  "source": "cab336781b981dbbb02747c07321509bec0bcc99",
+  "purpose": "Controlled transition equivalence, not winrate evidence",
+  "reference": "pokemon-showdown@0.11.11",
+  "random_coupling": "Test-only semantic median draws, 92 percent damage roll, fixed ties and secondary outcomes; separate distribution tests cover stochastic outcomes",
+  "raw_file": "controlled-trajectories.json",
+  "raw_sha256": "8c93b2912b35f2fa20a7552ba16065be68c1f262825f1f11ce53834497b1ace8",
+  "verified_continuously_without_state_reset": true,
+  "files": {
+    "tests/fixtures/alignment_reference.cjs": "a7155a115b5dc0547222133ea66c816f3cd26edf29d6034b14d4aca7c5e5d811",
+    "tests/test_pilot_trajectories.py": "9a976382dc15cf6d6485e0d2e2113ba90b21aca87b7e43474a5f707aeff87783",
+    "tests/test_volatile_phases_reference.py": "86458d34abe821e828c14019e4ffe17718dd17cb19d8e7d00e4393cdd606af3a",
+    "docs/alignment/pilot-scope.json": "e70a1ce15d5b4564ffc1a9c63df8ff79d8b328b8a04f6e3d2324010059891a5e",
+    "docs/alignment/pilot-coverage.json": "9b8b563f401c129f4b250053f7427fac2f02a1fb76baf13616e98c8f927c6627"
+  },
+  "games": [
+    {
+      "name": "development_offense_vs_development_rain",
+      "phases": 40,
+      "turns": 29,
+      "ended": true,
+      "winner": "P1"
+    },
+    {
+      "name": "development_rain_vs_balance",
+      "phases": 35,
+      "turns": 27,
+      "ended": true,
+      "winner": "P1"
+    },
+    {
+      "name": "balance_vs_stall",
+      "phases": 62,
+      "turns": 54,
+      "ended": true,
+      "winner": "P2"
+    },
+    {
+      "name": "stall_vs_pelol",
+      "phases": 119,
+      "turns": 111,
+      "ended": true,
+      "winner": "P1"
+    },
+    {
+      "name": "pelol_vs_development_offense",
+      "phases": 36,
+      "turns": 27,
+      "ended": true,
+      "winner": "P2"
+    }
+  ],
+  "unit_tests_passed": 568,
+  "official_controlled_executions": 26431,
+  "final_integration_games": 5,
+  "request_audit_requests": 341,
+  "request_audit_discrepancies": 0,
+  "original_checkpoint_files_verified_unchanged": 8,
+  "checkpoint_sha256": "2aa0deadf7d3ac650981e051544521ee8ccc0b9689f1457f921c0ed99957f0f6",
+  "integration_ledger": "docs/alignment/integration-results.json",
+  "raw_directory": "../evaluation-results/alignment-pilot-closure",
+  "training_started": false
+}
