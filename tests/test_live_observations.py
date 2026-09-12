@@ -37,6 +37,8 @@ def test_hidden_opponent_sets_produce_identical_observations():
     from glaubermon.evaluation.official_benchmark import OfficialBridge
     showdown=Path(__file__).resolve().parents[2]/'showdown-parity/node_modules/pokemon-showdown'
     if not showdown.exists():
+        showdown=Path(__file__).resolve().parents[1]/'tools/showdown/node_modules/pokemon-showdown'
+    if not showdown.exists():
         pytest.skip('Official simulator unavailable')
     original=PACKED_TEAMS['balance']
     modified=original.replace('Gholdengo||airballoon','Gholdengo||choicespecs').replace(

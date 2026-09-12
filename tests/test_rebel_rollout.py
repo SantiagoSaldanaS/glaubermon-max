@@ -84,10 +84,13 @@ def test_official_rollout_uses_both_private_views_and_marks_cap(tmp_path, monkey
     from pathlib import Path
     showdown = Path(__file__).resolve().parents[2] / 'showdown-parity/node_modules/pokemon-showdown'
     if not showdown.exists():
+        showdown = Path(__file__).resolve().parents[1] / 'tools/showdown/node_modules/pokemon-showdown'
+    if not showdown.exists():
         pytest.skip('Official simulator unavailable')
     monkeypatch.setattr(train_rebel.signal, 'signal', lambda *args: None)
     trainer = train_rebel.AlphaZeroTrainer(checkpoint_dir=str(tmp_path), d_model=32,
-                      nhead=4, reset_from_scratch=True, max_turns=2, mechanics_seed=19)
+                      nhead=4, reset_from_scratch=True, max_turns=2, mechanics_seed=19,
+                      showdown_path=str(showdown))
     samples = trainer.play_self_play_game()
     assert len(samples) >= 2
     assert not trainer.last_game_info['terminated']

@@ -5,6 +5,8 @@ from glaubermon.evaluation.official_benchmark import OfficialBridge, choice_text
 from glaubermon.client.showdown_bot import PACKED_TEAMS
 
 SHOWDOWN = Path(__file__).resolve().parents[2] / 'showdown-parity/node_modules/pokemon-showdown'
+if not SHOWDOWN.exists():
+    SHOWDOWN = Path(__file__).resolve().parents[1] / 'tools/showdown/node_modules/pokemon-showdown'
 pytestmark = pytest.mark.skipif(not SHOWDOWN.exists(), reason='pinned official npm simulator not installed')
 
 
