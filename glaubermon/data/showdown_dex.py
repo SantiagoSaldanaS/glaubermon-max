@@ -243,6 +243,7 @@ class ShowdownDex:
             volatile_status=entry.get("volatileStatus"),
             multihit=entry.get("multihit"),
             multiaccuracy=bool(entry.get("multiaccuracy",False)),
+            fail_encore=bool(flags.get("failencore")),
             move_type=m_type,
             category=m_cat,
             base_power=bp,

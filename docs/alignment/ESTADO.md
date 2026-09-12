@@ -2,6 +2,13 @@
 
 Instrucción de Felipe/Santiago: corregir las diferencias de entorno antes de reentrenar. `AlphaZeroTrainer.train()` rechaza corridas mientras `docs/ALIGNMENT_STATUS.json` no permita entrenar. No se inició reentrenamiento en estas tandas; las pruebas de optimizador usan modelos desechables. Los checkpoints originales se conservan.
 
+## Corregido en la cuarta tanda
+
+- **Encore y Disable:** conservan movimiento afectado y duración, restringen acciones sin destruir PP y expiran. Encore sustituye una selección ya encolada conservando su prioridad; Disable la cancela antes de gastar PP. Se contemplan ausencia de movimiento previo, PP agotados, flags canónicos de exclusión de Encore, cambio, Substitute, Magic Bounce, Aroma Veil y Mental Herb en casos controlados. Encore junto con Disable puede obligar a Struggle.
+- **Leech Seed:** inmunidad Grass, bloqueo por Substitute, reflejo, Magic Guard, Liquid Ooze, Big Root y limpieza con Rapid Spin/cambio. La curación sigue el puesto activo del lado que sembró y no la identidad del Pokémon que salió. Se aplica después de recuperación de objetos/Grassy Terrain y antes de daño de estado; se valida orden entre dos objetivos sembrados con y sin Trick Room. Al terminar la partida no se siguen descontando temporizadores.
+- **Observación pública:** último movimiento revelado por Pokémon, Encore/Disable con movimiento afectado y temporizador desconocido, y lado que recibe Leech Seed. Se conserva aislamiento de partidas, lados y ramas de búsqueda. Una restricción del request deja de sobrescribir PP con cero; el filtro temporal se separa del agotamiento real.
+- **Modelo:** contrato `public_restrictions_v5`, 83 características por Pokémon. Añade presencia de las tres condiciones y referencias al movimiento encorado, deshabilitado y último usado. Importa pesos de 64/68 características con columnas nuevas en cero; los pesos originales no se reescriben. Estas columnas aún no están aprendidas.
+
 ## Corregido en la tercera tanda
 
 - **Clima y terreno:** Rain Dance/Sunny Day/Sandstorm/Snowscape y los cuatro terrenos, setters de entrada (incluido Drizzle), duración de rocas/Terrain Extender, expiración, Cloud Nine/Air Lock, residuales y recuperación dependiente del clima. Grassy Terrain recupera HP al terminar el turno; Psychic Terrain bloquea prioridad dirigida a objetivos en tierra; Misty/Electric conservan sus restricciones de estado/Rest. Ice Spinner elimina también el contador del terreno.
@@ -9,7 +16,7 @@ Instrucción de Felipe/Santiago: corregir las diferencias de entorno antes de re
 - **Daño y precisión:** bonificaciones de terreno, reducción de Earthquake en Grassy y Dragon en Misty, defensas de Rock con arena/Ice con nieve, Weather Ball/Terrain Pulse y precisión de Hurricane/Thunder/Blizzard según el clima. La prueba diferencia daño directo, críticos y residuales.
 - **Golpes múltiples:** carga de metadatos canónicos, cantidad de impactos y precisión por golpe, Skill Link/Loaded Dice, potencia 20/40/60 de Triple Axel y 10/20/30 de Triple Kick. Cada impacto actualiza HP, Substitute, contacto y efectos secundarios; el ataque se detiene por fallo o KO y Life Orb cobra una vez. En búsqueda determinista se usa una cantidad representativa de golpes; las transiciones muestreadas sí sortean la distribución.
 
-Estas correcciones no certifican todos los callbacks ni redondeos combinados. Sigue pendiente representar como creencias los temporizadores ocultos y las activaciones ambientales persistentes de Protosynthesis/Quark Drive. El contrato de tensores continúa en `public_volatile_v4`.
+Estas correcciones no certifican todos los callbacks ni redondeos combinados. Sigue pendiente representar como creencias los temporizadores ocultos y las activaciones ambientales persistentes de Protosynthesis/Quark Drive. Esta tercera tanda conservó el contrato `public_volatile_v4`; la cuarta lo amplía a `public_restrictions_v5`.
 
 ## Corregido en la segunda tanda
 
@@ -29,7 +36,7 @@ Pantallas, Tailwind y Trick Room recorren protocolo → estado → búsqueda →
 
 ## Contrato del modelo
 
-`public_volatile_v4` conserva los 40 campos globales y amplía los datos por Pokémon de 64 a 68 valores para Substitute, Taunt, ligadura y confusión. Los campos globales 37–39 identifican quién debe reemplazar y si existe una continuación interna del turno. `load_compatible_state_dict` amplía los pesos anteriores con columnas cero y pone a cero las nuevas señales de fase al importar el formato anterior. Los bytes originales no se modifican; esta operación no enseña al modelo las nuevas reglas.
+`public_restrictions_v5` conserva 40 campos globales y amplía los datos por Pokémon a 83 valores: 64 históricos, 4 de Substitute/Taunt/ligadura/confusión, 3 presencias de Encore/Disable/Leech Seed y 12 indicadores del movimiento afectado/último movimiento (cuatro posiciones para cada uno). Los campos globales 37–39 identifican quién debe reemplazar y si existe una continuación interna del turno. `load_compatible_state_dict` importa los formatos de 64 y 68 características mediante columnas cero; solo al importar 64 se ponen a cero también las señales de fase. Se aceptan tensores históricos con padding explícito. No se modifican los bytes originales ni se enseña al modelo las nuevas reglas con esta adaptación.
 
 Un futuro entrenamiento necesita un experimento nuevo; no se reanuda una carpeta con un contrato de observación anterior. Los resultados 73/100 y 79/100 pertenecen a la versión congelada `01a6ee1` y no evalúan estas correcciones.
 
@@ -40,8 +47,9 @@ Referencia: paquete fijado **Pokémon Showdown 0.11.11**, Gen 9 custom game, con
 - Primera batería: 18 secuencias deterministas, 5 familias de daño con pantallas (256 batallas cada una), parálisis/congelación (512 cada una) y 7 familias de efectos secundarios (256 cada una).
 - Segunda batería: 45 secuencias deterministas de volátiles/reemplazos/entrada, 2 familias de confusión (512 cada una) y 2 de Magma Storm (256 cada una).
 - Tercera batería: 77 secuencias deterministas, 12 familias de daño (256 cada una), 6 de cantidad de impactos (512 cada una), Triple Axel por impacto (256) y 5 de precisión por clima (512 cada una).
-- Total: **14,732 ejecuciones oficiales**. Se comparan HP, estado, PP, boosts, objetos, volátiles, hazards, jugador que debe reemplazar y contador de turno. En los casos aleatorios se comparan soportes/frecuencias con tolerancias explícitas, no resultados idénticos por semilla: los RNG son diferentes.
-- Suite completa: **328 pruebas aprobadas**, incluyendo protocolo→tensores, aislamiento entre lados, compatibilidad de pesos, independencia de ramas y bloqueo de entrenamiento.
+- Cuarta batería: 40 secuencias deterministas de restricciones y Leech Seed, más 512 batallas para precisión de Leech Seed. Incluye PP, último movimiento, expiración, casos de KO, prioridad y efecto de Trick Room sobre residuales simultáneos.
+- Total: **15,284 ejecuciones oficiales**. Se comparan HP, estado, PP, boosts, objetos, volátiles, hazards, jugador que debe reemplazar y contador de turno. En los casos aleatorios se comparan soportes/frecuencias con tolerancias explícitas, no resultados idénticos por semilla: los RNG son diferentes.
+- Suite completa: **372 pruebas aprobadas**, incluyendo protocolo→tensores, aislamiento entre lados, compatibilidad de pesos, independencia de ramas y bloqueo de entrenamiento.
 
 Además, se completaron 16 partidas locales de integración sin acciones inválidas, fallbacks ni timeouts. Cuatro corresponden a la tercera tanda: dos entre equipos de desarrollo y dos de control a profundidad 2. Triple Axel no fue elegido en esas partidas; se valida por impacto en fixtures. En la comparación histórica de la tanda anterior, la evaluación por lotes conservó las decisiones de las dos partidas comparadas y redujo el máximo observado de 26.787 a 15.534 s. Detalle y fuentes: [INTEGRACION.md](INTEGRACION.md).
 
@@ -50,7 +58,7 @@ Estos fixtures controlados no certifican reglas completas de OU ni equivalencia 
 ## Pendiente antes de levantar la pausa
 
 1. Ampliar cobertura de fases a callbacks de entrada simultáneos y otros pivotes (Baton Pass, Shed Tail, Parting Shot, Teleport). Las tres familias de pivote usadas por los equipos de desarrollo ya tienen fases explícitas.
-2. Completar otros volátiles relevantes (Encore, Disable, Leech Seed). En observación pública, HP restante de Substitute y temporizadores ocultos son desconocidos: la búsqueda aún usa hipótesis conservadoras, no una distribución de creencias completa. La fuerza de Binding Band oculta también se estima. Una solicitud pública de reemplazo no revela el movimiento enemigo pendiente; el cliente evalúa esa situación sin copiar la cola privada del motor oficial.
+2. Ampliar a otros volátiles y a interacciones con movimientos llamados o transformados; Encore, Disable y Leech Seed ya cuentan con la batería descrita. En observación pública, HP restante de Substitute y temporizadores ocultos son desconocidos: la búsqueda aún usa hipótesis conservadoras, no una distribución de creencias completa. La fuerza de Binding Band oculta también se estima. Una solicitud pública de reemplazo no revela el movimiento enemigo pendiente; el cliente evalúa esa situación sin copiar la cola privada del motor oficial.
 3. Ampliar clima/terreno a setters simultáneos, climas primigenios, activaciones persistentes de Protosynthesis/Quark Drive y otros callbacks de potencia dinámica. Drizzle/Swift Swim y Triple Axel ya están implementados y contrastados en los casos controlados descritos.
 4. Completar callbacks de objetos/habilidades, inmunidades, prioridades y redondeos combinados. La existencia de un helper de entrada no implica que todas las habilidades estén implementadas.
 5. Contrastar trayectorias completas y estados de búsqueda en todos los arquetipos de desarrollo, y evaluar calidad de juego de esta versión.

@@ -26,6 +26,7 @@ def reset_on_switch(mon):
     """Switch-out clears temporary state; major status persists except Natural Cure."""
     mon.boosts = {key:0 for key in mon.boosts}
     mon.choice_locked_move = None
+    mon.last_move = None
     mon.protect_streak = 0
     mon.protect_success_rate = 0.0
     mon.booster_stat = None
@@ -124,6 +125,14 @@ def perform_switch(state, side_idx, target_slot):
     apply_entry_abilities(state, side_idx)
 
 
+def finalized_state(state):
+    # Showdown clears volatile conditions when a faint is processed.
+    for side in (state.p1,state.p2):
+        for mon in side.pokemon:
+            if mon.is_fainted:mon.volatiles.clear()
+    return state
+
+
 def simulate_turn_transition(
     state: BattleState,
     a1: Action,
@@ -142,6 +151,9 @@ def simulate_turn_transition(
     """
     rng = rng if rng is not None else random
     s = state.clone()
+    for side in (s.p1,s.p2):
+        for mon in side.pokemon:
+            for move in mon.moves:move.request_disabled = False
     if not s.pending_switches:
         s.pending_switches = tuple(i for i,side in ((1,s.p1),(2,s.p2))
             if side.active_pokemon and side.active_pokemon.is_fainted and not side.is_all_fainted)
@@ -179,14 +191,14 @@ def simulate_turn_transition(
             if (s.p1 if i == 1 else s.p2).active_pokemon.is_fainted
             and not (s.p1 if i == 1 else s.p2).is_all_fainted)
         if s.pending_switches or s.is_game_over:
-            return s
+            return finalized_state(s)
         if saved is None:
             s.pending_switches = tuple(i for i,side in ((1,s.p1),(2,s.p2))
                 if side.active_pokemon and side.active_pokemon.is_fainted and not side.is_all_fainted)
             if s.pending_switches:
-                return s
+                return finalized_state(s)
             s.turn += 1
-            return s  # End-of-turn replacement, no second residual tick or attack.
+            return finalized_state(s)  # End-of-turn replacement, no second residual tick or attack.
         s.continuation = None
 
     # Phase 2: Handle Terastallization
@@ -270,6 +282,11 @@ def simulate_turn_transition(
         if attacker is not selected_users[player]:
             continue  # A Pokémon dragged out before its turn cannot pass its move to the replacement.
         if attacker and not attacker.is_fainted and defender and not defender.is_fainted:
+            execution_priority = move_priority(attacker,move)
+            if move.id != "struggle":
+                forced = attacker.volatiles.get("encore",{}).get("move")
+                if forced:
+                    move = next((m for m in attacker.moves if m.id == forced),move)
             m_id = move.id.lower().replace(" ", "").replace("-", "")
             selected = move
             is_protection = move.is_protect or m_id in ("protect", "spikyshield", "detect", "banefulbunker", "silktrap")
@@ -296,6 +313,9 @@ def simulate_turn_transition(
             if player in flinched:
                 moved_players.add(player)
                 continue
+            if attacker.volatiles.get("disable",{}).get("move") == m_id:
+                moved_players.add(player)
+                continue
             if "taunt" in attacker.volatiles and move.category == MoveCategory.STATUS and m_id != "mefirst":
                 moved_players.add(player)
                 continue
@@ -318,6 +338,7 @@ def simulate_turn_transition(
             if attacker.status == StatusCondition.PARALYSIS and sample_outcomes and rng.random() < 0.25:
                 moved_players.add(player)
                 continue
+            attacker.last_move = move.id
             atk_it = clean_key(attacker.item)
             if atk_it in ("choicespecs", "choiceband", "choicescarf") and not attacker.choice_locked_move:
                 attacker.choice_locked_move = m_id
@@ -383,7 +404,7 @@ def simulate_turn_transition(
             if targets_foe and move.category==MoveCategory.STATUS and clean_key(attacker.ability)=="prankster" and PokemonType.DARK in defender.active_types:
                 moved_players.add(player)
                 continue
-            if targets_foe and s.terrain==Terrain.PSYCHIC and defender.is_grounded() and move_priority(attacker,move)>0:
+            if targets_foe and s.terrain==Terrain.PSYCHIC and defender.is_grounded() and execution_priority>0:
                 moved_players.add(player)
                 continue
             if sample_outcomes and targets_foe and rng.random() >= accuracy_chance(attacker,defender,move,battle_weather):
@@ -556,6 +577,25 @@ def simulate_turn_transition(
                 attacker.take_damage(cost)
                 attacker.volatiles["substitute"] = {"hp":cost}
                 attacker.volatiles.pop("partiallytrapped",None)
+            elif m_id in ("encore","disable"):
+                target = attacker if is_magic_bounce else defender
+                previous = next((m for m in target.moves if m.id == target.last_move),None)
+                allowed = previous and previous.pp > 0 and previous.id != "struggle"
+                if m_id == "encore" and previous and previous.fail_encore:allowed = False
+                if allowed and m_id not in target.volatiles and clean_key(target.ability) not in ("aromaveil","goodasgold"):
+                    if clean_key(target.item) == "mentalherb":
+                        target.item = None
+                        for condition in ("taunt","encore","disable","torment","healblock","attract"):
+                            target.volatiles.pop(condition,None)
+                    else:
+                        other = "p2" if player == "p1" else "p1"
+                        has_queued_move = not is_magic_bounce and other not in moved_players and selected_users.get(other) is target
+                        duration = (3 if m_id == "encore" else 4) + int(not has_queued_move)
+                        target.volatiles[m_id] = {"duration":duration,"move":previous.id}
+            elif m_id == "leechseed":
+                target = attacker if is_magic_bounce else defender
+                if PokemonType.GRASS not in target.active_types and clean_key(target.ability) != "goodasgold":
+                    target.volatiles.setdefault("leechseed", {"source_side":(2 if player == "p1" else 1) if is_magic_bounce else (1 if player == "p1" else 2)})
             elif m_id == "taunt":
                 target = attacker if is_magic_bounce else defender
                 if clean_key(target.ability) not in ("oblivious","aromaveil","goodasgold"):
@@ -607,6 +647,7 @@ def simulate_turn_transition(
                     user_side = s.p1 if player == "p1" else s.p2
                     user_side.hazards.clear()
                     attacker.volatiles.pop("partiallytrapped",None)
+                    if m_id == "rapidspin":attacker.volatiles.pop("leechseed",None)
                     if m_id == "tidyup":
                         s.p1.hazards.clear()
                         s.p2.hazards.clear()
@@ -706,12 +747,13 @@ def simulate_turn_transition(
                 s.continuation = dict(order=remaining, moved=list(moved_players), flinched=list(flinched),
                     users={who:next(i for i,p in enumerate((s.p1 if who == "p1" else s.p2).pokemon) if p is mon)
                            for who,mon in selected_users.items() if mon}, m1=m1, m2=m2)
-                return s
+                return finalized_state(s)
 
     if s.is_game_over:
-        return s  # Showdown ends immediately; no residual damage/healing or duration tick.
+        return finalized_state(s)  # Showdown ends immediately; no residual damage/healing or duration tick.
 
     weather_residual(s)
+    if s.is_game_over:return finalized_state(s)
 
     # Phase 4: End-of-turn effects (Leftovers, Black Sludge, Poison Heal, Status Orbs, Burn, Poison)
     for act_mon in (s.p1.active_pokemon, s.p2.active_pokemon):
@@ -733,6 +775,27 @@ def simulate_turn_transition(
                 else:
                     act_mon.take_damage(max(1, act_mon.max_hp // 8))
 
+    if s.is_game_over:return finalized_state(s)
+
+    # Leech Seed follows the source's active slot, not the original Pokemon.
+    seed_sides = [side for side in (s.p1,s.p2) if side.active_pokemon]
+    seed_sides.sort(key=lambda side: speed_order_key(side.active_pokemon,side,s),reverse=True)
+    for side in seed_sides:
+        seeded = side.active_pokemon
+        source_side = seeded.volatiles.get("leechseed",{}).get("source_side") if seeded else None
+        recipient = (s.p1 if source_side == 1 else s.p2).active_pokemon if source_side else None
+        if seeded and not seeded.is_fainted and recipient and not recipient.is_fainted and clean_key(seeded.ability) != "magicguard":
+            drained = seeded.take_damage(max(1,seeded.max_hp//8))
+            if clean_key(seeded.ability) == "liquidooze":
+                if clean_key(recipient.ability) != "magicguard":recipient.take_damage(drained)
+            else:
+                healed = (drained*5324+2047)//4096 if clean_key(recipient.item) == "bigroot" else drained
+                recipient.heal(healed)
+            if s.is_game_over:return finalized_state(s)
+
+    for act_mon in (s.p1.active_pokemon,s.p2.active_pokemon):
+        if act_mon and not act_mon.is_fainted:
+            ab,it = clean_key(act_mon.ability),clean_key(act_mon.item)
             # Poison / Toxic (with Poison Heal support)
             if act_mon.status in (StatusCondition.POISON, StatusCondition.TOXIC):
                 if ab == "poisonheal":
@@ -756,6 +819,12 @@ def simulate_turn_transition(
                     act_mon.volatiles.pop("partiallytrapped")
                 elif ab != "magicguard":
                     act_mon.take_damage(max(1,act_mon.max_hp // trap.get("divisor",8)))
+            for condition in ("encore","disable"):
+                effect = act_mon.volatiles.get(condition)
+                if effect:
+                    if effect.get("duration",-1) > 0:effect["duration"] -= 1
+                    exhausted = condition == "encore" and not any(m.id == effect.get("move") and m.pp > 0 for m in act_mon.moves)
+                    if effect.get("duration") == 0 or exhausted:act_mon.volatiles.pop(condition)
             taunt = act_mon.volatiles.get("taunt")
             if taunt and taunt.get("duration",-1) > 0:
                 taunt["duration"] -= 1
@@ -770,6 +839,7 @@ def simulate_turn_transition(
 
 
 
+    if s.is_game_over:return finalized_state(s)
     for side in (s.p1,s.p2):
         side.tailwind = max(0,side.tailwind-1)
         side.screens = {name:(turns-1 if turns>0 else turns) for name,turns in side.screens.items() if turns != 1}
@@ -782,7 +852,7 @@ def simulate_turn_transition(
     if not s.pending_switches and not s.is_game_over:
         s.turn += 1
 
-    return s
+    return finalized_state(s)
 
 
 class SubgameResolver:

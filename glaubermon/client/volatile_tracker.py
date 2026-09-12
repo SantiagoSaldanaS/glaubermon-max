@@ -12,6 +12,7 @@ class PublicVolatileTracker:
         self.identities = {}
         self.last_move_source = None
         self.entry_once = {}
+        self.last_moves = {}
 
     def identify(self, ident):
         return ident[:2], self.identities.get(ident,clean_key(ident.split(':')[-1]))
@@ -26,6 +27,7 @@ class PublicVolatileTracker:
             for mon_key in (previous,key):
                 if mon_key:
                     self.mons.pop(mon_key,None)
+                    self.last_moves.pop(mon_key,None)
                     for conditions in self.mons.values():
                         for condition in ('trapped','partiallytrapped'):
                             if conditions.get(condition,{}).get('source') == mon_key:
@@ -42,6 +44,7 @@ class PublicVolatileTracker:
                     self.entry_once.setdefault(key,set()).add(flag)
         if command == 'move':
             self.last_move_source = key
+            self.last_moves[key] = clean_key(parts[3]) if len(parts)>3 else None
             return
         if command == 'faint':
             self.mons.pop(key,None)
@@ -53,6 +56,11 @@ class PublicVolatileTracker:
         if command == '-start':
             if effect == 'substitute':
                 values[effect] = {'hp':-1}
+            elif effect in ('encore','disable'):
+                move = clean_key(parts[4]) if effect == 'disable' and len(parts)>4 else self.last_moves.get(key)
+                values[effect] = {'duration':-1,'move':move}
+            elif effect == 'leechseed':
+                values[effect] = {'source_tag':'p2' if key[0]=='p1' else 'p1'}
             elif effect == 'taunt':
                 values[effect] = {'duration':-1}
             elif effect == 'confusion':
@@ -68,6 +76,9 @@ class PublicVolatileTracker:
 
     def observations(self, tag, species, sides):
         values = deepcopy(self.mons.get((tag,clean_key(species)),{}))
+        if 'leechseed' in values:
+            source = values['leechseed'].pop('source_tag',None)
+            values['leechseed']['source_side'] = sides[source][0] if source in sides else None
         for condition in ('trapped','partiallytrapped'):
             source = values.get(condition,{}).get('source')
             if source:

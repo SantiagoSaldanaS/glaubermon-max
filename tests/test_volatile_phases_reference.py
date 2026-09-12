@@ -91,7 +91,7 @@ def test_volatile_and_phase_trajectory(case,references):
     species=exp_side['mons'][exp_side['active']]['species']
     index=next(i for i,p in enumerate(side.pokemon) if p.species==species)
     actions.append(SwitchAction(index+1,species))
-   else: actions.append(MoveAction('struggle' if not any(m.pp for m in side.active_pokemon.moves) else side.active_pokemon.moves[slot-1].id,slot))
+   else: actions.append(MoveAction('struggle' if not any(m.pp for m in side.active_pokemon.moves) or (case.get('refresh_disabled') and not any(getattr(a,'move_id','struggle') != 'struggle' for a in state.get_valid_actions(side_idx+1))) else side.active_pokemon.moves[slot-1].id,slot))
   state=simulate_turn_transition(state,*actions,sample_outcomes=True,rng=random.Random(17))
   for actual,exp in zip((state.p1,state.p2),expected['sides']):
    assert actual.active_pokemon.species==exp['mons'][exp['active']]['species']
@@ -100,6 +100,7 @@ def test_volatile_and_phase_trajectory(case,references):
     ours=next(p for p in actual.pokemon if p.species==m['species'])
     assert ours.current_hp==m['hp'], (case['name'],choices,ours.species,ours.current_hp,m['hp'])
     if m['hp'] > 0: assert ours.status==STATUS[m['status']]
+    if case.get('compare_last_move') and m['hp']>0:assert ours.last_move==m['lastMove']
     assert ours.boosts==m['boosts']
     assert (ours.item or '')==m['item']
     assert [mv.pp for mv in ours.moves]==[mv['pp'] for mv in m['moves']]

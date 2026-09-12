@@ -963,8 +963,9 @@ class ShowdownBot:
                     move_obj = self.dex.get_move(m_id)
                     is_dis = bool(m.get("disabled", False))
                     pp_val = int(m.get("pp", 10))
-                    # Mark disabled moves with pp = 0 so battle_state skips them while preserving slot indices!
-                    move_obj.pp = 0 if is_dis else pp_val
+                    # A temporary restriction does not consume the move's PP.
+                    move_obj.pp = pp_val
+                    move_obj.request_disabled = is_dis
                     if "maxpp" in m:
                         move_obj.max_pp = int(m["maxpp"])
                     moves.append(move_obj)
@@ -1204,6 +1205,7 @@ class ShowdownBot:
         for tag,(_,side) in sides.items():
             for mon in side.pokemon:
                 mon.volatiles = tracker.observations(tag,mon.species,sides)
+                mon.last_move = tracker.last_moves.get((tag,clean_key(mon.species)))
                 for flag in tracker.entry_once.get((tag,clean_key(mon.species)),set()):
                     setattr(mon,flag,True)
         if p1_side.active_pokemon and req.get("active",[{}])[0].get("trapped"):

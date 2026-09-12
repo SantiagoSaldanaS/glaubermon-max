@@ -50,7 +50,7 @@ def from_snapshot(data):
     move=Move.from_dex(m['id']);move.pp=m['pp'];move.max_pp=m['maxpp'];moves.append(move)
    types=[PokemonType(t) for t in p['types']]
    mons.append(Pokemon(species=p['species'],types=(types[0],types[1] if len(types)>1 else None),current_hp=p['hp'],max_hp=p['maxhp'],
-      level=p.get('level',100),volatiles=deepcopy(p.get('volatiles',{})),raw_stats={'hp':p['maxhp'],**p['stats']},ability=p['ability'],item=p['item'],status=STATUS[p['status']],status_turns=p['time'],boosts=p['boosts'].copy(),moves=moves))
+      last_move=p.get('lastMove'),level=p.get('level',100),volatiles=deepcopy(p.get('volatiles',{})),raw_stats={'hp':p['maxhp'],**p['stats']},ability=p['ability'],item=p['item'],status=STATUS[p['status']],status_turns=p['time'],boosts=p['boosts'].copy(),moves=moves))
    mons[-1].shield_boosted=p.get('shieldBoost',False)
    mons[-1].sword_boosted=p.get('swordBoost',False)
   sides.append(BattleSide(mons,active_index=side['active'],hazards={hazard_keys[k]:v for k,v in side.get('hazards',{}).items()},screens=side['screens'].copy(),tailwind=side['tailwind']))

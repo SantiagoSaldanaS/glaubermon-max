@@ -2,9 +2,9 @@
 const {Battle}=require(process.argv[2]);
 const input=JSON.parse(require('fs').readFileSync(0,'utf8'));
 function mon(p) {return {species:p.species.name,level:p.level,types:p.getTypes(),hp:p.hp,maxhp:p.maxhp,stats:{...p.storedStats},
- shieldBoost:!!p.shieldBoost,swordBoost:!!p.swordBoost,ability:p.ability,item:p.item,status:p.status,time:p.statusState.time||0,boosts:{...p.boosts},
- volatiles:Object.fromEntries(['substitute','taunt','confusion','partiallytrapped','trapped'].filter(k=>p.volatiles[k]).map(k=>{
- const v=p.volatiles[k];return [k,{...(v.hp!==undefined?{hp:v.hp}:{}),...(v.duration!==undefined?{duration:v.duration}:{}),
+ lastMove:p.lastMove?.id||null,shieldBoost:!!p.shieldBoost,swordBoost:!!p.swordBoost,ability:p.ability,item:p.item,status:p.status,time:p.statusState.time||0,boosts:{...p.boosts},
+ volatiles:Object.fromEntries(['substitute','taunt','confusion','partiallytrapped','trapped','encore','disable','leechseed'].filter(k=>p.volatiles[k]).map(k=>{
+ const v=p.volatiles[k];return [k,{...(v.move?{move:v.move}:{}),...(k==='leechseed'?{source_side:Number(v.sourceSlot[1])}:{}),...(v.hp!==undefined?{hp:v.hp}:{}),...(v.duration!==undefined?{duration:v.duration}:{}),
  ...(v.time!==undefined?{time:v.time}:{}),...(v.boundDivisor?{divisor:v.boundDivisor}:{}),
  ...(['partiallytrapped','trapped'].includes(k)&&v.source?{source:[v.source.side.n+1,v.source.species.name]}:{})}];})),
  moves:p.moveSlots.map(m=>({id:m.id,pp:m.pp,maxpp:m.maxpp}))};}
@@ -22,6 +22,7 @@ for (const fixture of input) {
  b.makeChoices('team 123456'.slice(0,5+team[0].length),'team 123456'.slice(0,5+team[1].length));
  for(let i=0;i<2;i++) {
   const p=b.sides[i].active[0], c=fixture.initial?.[i]||{};
+  if(c.last_move)p.lastMove=b.dex.getActiveMove(c.last_move);
   if(c.hp!==undefined)p.hp=c.hp;
   if(c.status){p.setStatus(c.status);if(c.time!==undefined)p.statusState.time=c.time;}
   if(c.boosts)Object.assign(p.boosts,c.boosts);
@@ -38,6 +39,7 @@ for (const fixture of input) {
  if(fixture.weather){b.field.setWeather(fixture.weather,b.sides[0].active[0]);if(fixture.weather_turns!==undefined)b.field.weatherState.duration=fixture.weather_turns;}
  if(fixture.terrain){b.field.setTerrain(fixture.terrain,b.sides[0].active[0]);if(fixture.terrain_turns!==undefined)b.field.terrainState.duration=fixture.terrain_turns;}
  if(fixture.trick_room)b.field.addPseudoWeather('trickroom',b.sides[0].active[0]);
+ if(fixture.refresh_disabled)for(const side of b.sides)b.runEvent('DisableMove',side.active[0]);
  if(fixture.initial?.some(c=>c.pp)) b.makeRequest("move");
  const damageTrace=[];
  for(const side of b.sides) for(const pokemon of side.pokemon){
@@ -51,6 +53,6 @@ for (const fixture of input) {
  const before=snap(b), results=[];
  for(const choices of fixture.actions||[['move 1','move 1']]) { b.makeChoices(...choices);results.push(snap(b));if(b.ended)break; }
  output.push({name:fixture.name,before,results,damageTrace,log:b.log});
- } finally {b.destroy();}
+ } catch(error) {throw new Error(fixture.name+": "+error.message,{cause:error});} finally {b.destroy();}
 }
 console.log(JSON.stringify(output));

@@ -42,6 +42,8 @@ class Move:
     volatile_status: Optional[str] = None
     multihit: Any = None
     multiaccuracy: bool = False
+    fail_encore: bool = False
+    request_disabled: bool = False
 
     def clone(self) -> "Move":
         """Copy mutable battle data without reloading or reinterpreting the Dex."""
@@ -86,7 +88,7 @@ class Move:
             try:
                 from glaubermon.data.showdown_dex import ShowdownDex
                 dex_m = ShowdownDex.get_instance().get_move(move_id)
-                secondary_meta = {k:deepcopy(getattr(dex_m,k)) for k in ("secondaries","defrost","sleep_usable","sleep_talk_callable","bypass_substitute","volatile_status","multihit","multiaccuracy")}
+                secondary_meta = {k:deepcopy(getattr(dex_m,k)) for k in ("secondaries","defrost","sleep_usable","sleep_talk_callable","bypass_substitute","volatile_status","multihit","multiaccuracy","fail_encore")}
                 if pp is None:
                     pp = dex_m.pp
                 if max_pp is None:
@@ -180,6 +182,7 @@ class Pokemon:
     protect_streak: int = 0
     booster_stat: Optional[str] = None
     choice_locked_move: Optional[str] = None
+    last_move: Optional[str] = None
     raw_stats: Dict[str, int] = field(default_factory=dict)
     volatiles: Dict[str, Any] = field(default_factory=dict)
 

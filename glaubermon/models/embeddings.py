@@ -12,9 +12,9 @@ WEATHER_MAP = {w: i for i, w in enumerate(Weather)}
 TERRAIN_MAP = {t: i for i, t in enumerate(Terrain)}
 
 MOVE_DIM = 32
-STAT_DIM = 68
+STAT_DIM = 83
 FIELD_DIM = 40
-FEATURE_SCHEMA = "public_volatile_v4"
+FEATURE_SCHEMA = "public_restrictions_v5"
 
 
 _MOVE_ENCODING_CACHE: Dict[Tuple, torch.Tensor] = {}
@@ -61,8 +61,20 @@ def encode_volatiles(mon):
                          taunt / 4, bind / 8, confusion / 5],dtype=torch.float32)
 
 
+def encode_restrictions(mon):
+    # Presence is separate from move identity: public logs can leave it unknown.
+    result = torch.zeros(15,dtype=torch.float32)
+    for i,key in enumerate(("encore","disable","leechseed")):
+        result[i] = float(key in mon.volatiles)
+    for offset,move_id in ((3,mon.volatiles.get("encore",{}).get("move")),
+                           (7,mon.volatiles.get("disable",{}).get("move")),(11,mon.last_move)):
+        for slot,move in enumerate(mon.moves[:4]):
+            result[offset+slot] = float(move.id == move_id)
+    return result
+
+
 def encode_pokemon(mon: Optional[Pokemon], is_active: bool = False) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Encode a single Pokémon and its 4 moves into moves (4, 32) + stats (64,)."""
+    """Encode a single Pokémon and its 4 moves into moves (4, 32) + stats (STAT_DIM,)."""
     moves_tensor = torch.zeros(4, MOVE_DIM, dtype=torch.float32)
     stats_tensor = torch.zeros(STAT_DIM, dtype=torch.float32)
 
@@ -103,6 +115,7 @@ def encode_pokemon(mon: Optional[Pokemon], is_active: bool = False) -> Tuple[tor
         stats_tensor[54 + i] = min(1.0, val / 255.0)
 
     stats_tensor[64:68] = encode_volatiles(mon)
+    stats_tensor[68:83] = encode_restrictions(mon)
     return moves_tensor, stats_tensor
 
 
@@ -110,8 +123,8 @@ def encode_battle_state(state: BattleState) -> Tuple[Tuple[torch.Tensor, torch.T
     """Convert entire 6v6 BattleState into model-ready PyTorch tensors with preallocated buffers.
 
     Returns:
-        p1_tensor: Tuple of (moves (6, 4, 32), stats (6, 64))
-        p2_tensor: Tuple of (moves (6, 4, 32), stats (6, 64))
+        p1_tensor: Tuple of (moves (6, 4, 32), stats (6, STAT_DIM))
+        p2_tensor: Tuple of (moves (6, 4, 32), stats (6, STAT_DIM))
         field_tensor: Tensor of shape (40,) containing weather, terrain, hazards
     """
     p1_moves_t = torch.zeros(6, 4, MOVE_DIM, dtype=torch.float32)
@@ -125,6 +138,7 @@ def encode_battle_state(state: BattleState) -> Tuple[Tuple[torch.Tensor, torch.T
             for j in range(min(4, len(mon.moves))):
                 p1_moves_t[i, j] = encode_move(mon.moves[j])
             p1_stats_t[i, 64:68] = encode_volatiles(mon)
+            p1_stats_t[i, 68:83] = encode_restrictions(mon)
             p1_stats_t[i, 1] = mon.hp_percent
             p1_stats_t[i, 2] = 1.0 if i == state.p1.active_index else 0.0
             p1_stats_t[i, 3] = 1.0 if mon.is_terastallized else 0.0
@@ -152,6 +166,7 @@ def encode_battle_state(state: BattleState) -> Tuple[Tuple[torch.Tensor, torch.T
             for j in range(min(4, len(mon.moves))):
                 p2_moves_t[i, j] = encode_move(mon.moves[j])
             p2_stats_t[i, 64:68] = encode_volatiles(mon)
+            p2_stats_t[i, 68:83] = encode_restrictions(mon)
             p2_stats_t[i, 1] = mon.hp_percent
             p2_stats_t[i, 2] = 1.0 if i == state.p2.active_index else 0.0
             p2_stats_t[i, 3] = 1.0 if mon.is_terastallized else 0.0

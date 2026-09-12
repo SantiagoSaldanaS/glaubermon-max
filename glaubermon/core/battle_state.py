@@ -105,8 +105,13 @@ class BattleState:
         locked_m = active.choice_locked_move if is_choice else None
 
         for i, move in enumerate(active.moves):
-            if move.pp > 0:
+            if move.pp > 0 and not move.request_disabled:
                 if "taunt" in active.volatiles and move.category == MoveCategory.STATUS and move.id != "mefirst":
+                    continue
+                if active.volatiles.get("disable",{}).get("move") == move.id:
+                    continue
+                encored = active.volatiles.get("encore",{}).get("move")
+                if encored and encored != move.id:
                     continue
                 if locked_m and clean_key(move.id) != clean_key(locked_m):
                     continue
@@ -144,6 +149,8 @@ class BattleState:
         result.pending_switches = tuple(sorted(3-i for i in result.pending_switches))
         for side in (result.p1,result.p2):
             for mon in side.pokemon:
+                source_side = mon.volatiles.get("leechseed",{}).get("source_side")
+                if source_side:mon.volatiles["leechseed"]["source_side"] = 3-source_side
                 for key in ("trapped","partiallytrapped"):
                     source = mon.volatiles.get(key,{}).get("source")
                     if source:

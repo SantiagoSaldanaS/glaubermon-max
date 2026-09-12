@@ -81,7 +81,7 @@ def test_public_volatiles_are_side_specific_and_keep_hidden_values_unknown():
  assert 'substitute' not in state.p1.active_pokemon.volatiles
  assert state.is_trapped(1)
  tensors=encode_battle_state(state)
- assert tensors[0][1].shape==(6,68)
+ assert tensors[0][1].shape==(6,83)
  assert tensors[1][1][0,64]==-1 and tensors[1][1][0,65]<0
  assert torch.equal(tensors[1][1][0],encode_pokemon(state.p2.active_pokemon,True)[1])
  asyncio.run(b.handle_message('>'+room+'\n|-end|p1a: Great Tusk|confusion\n|switch|p2a: Great Tusk|Great Tusk, L100|100/100'))
@@ -102,12 +102,12 @@ def test_public_force_request_reaches_actions_and_phase_features():
 def test_legacy_token_import_zeros_new_observations_without_mutating_source():
  model=GlaubermonMaxNet(d_model=32,nhead=4).eval()
  old={key:value.clone() for key,value in model.state_dict().items()}
- old['mon_projector.0.weight']=old['mon_projector.0.weight'][:,:-4].clone()
+ old['mon_projector.0.weight']=old['mon_projector.0.weight'][:,:192].clone()
  original=old['field_fc.0.weight'].clone()
  model.load_compatible_state_dict(old)
  assert torch.equal(old['field_fc.0.weight'],original)
- assert torch.count_nonzero(model.mon_projector[0].weight[:,-4:])==0
+ assert torch.count_nonzero(model.mon_projector[0].weight[:,192:])==0
  assert torch.count_nonzero(model.field_fc[0].weight[:,37:40])==0
  token=torch.randn(2,model.mon_projector[0].in_features)
- baseline=token.clone();baseline[:,-4:]=0
+ baseline=token.clone();baseline[:,192:]=0
  assert torch.allclose(model.mon_projector(token),model.mon_projector(baseline),atol=1e-6)
