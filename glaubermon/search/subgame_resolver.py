@@ -12,7 +12,7 @@ from glaubermon.inference.damage_calc import calculate_damage_rolls, is_contact_
 from glaubermon.search.evaluators import StateEvaluator, HeuristicEvaluator
 from glaubermon.search.matrix_solver import solve_zero_sum_game
 from glaubermon.core.field_mechanics import (effective_weather,effective_speed,move_priority,accuracy_chance,
-    set_weather,set_terrain,sync_paradox,weather_residual,hit_count,WEATHER_MOVES,WEATHER_ABILITIES,TERRAIN_MOVES,TERRAIN_ABILITIES)
+    resolved_move_type,consume_lum_berry,set_weather,set_terrain,sync_paradox,weather_residual,hit_count,WEATHER_MOVES,WEATHER_ABILITIES,TERRAIN_MOVES,TERRAIN_ABILITIES)
 
 
 def speed_order_key(mon, side, state):
@@ -30,6 +30,7 @@ def reset_on_switch(mon):
     mon.protect_streak = 0
     mon.protect_success_rate = 0.0
     mon.booster_stat = None
+    mon.type_override = None
     mon.toxic_counter = 0
     mon.volatiles.clear()
     if clean_key(mon.ability) == "naturalcure":
@@ -122,7 +123,9 @@ def perform_switch(state, side_idx, target_slot):
                 if mon.volatiles.get(key,{}).get("source") == (side_idx,outgoing_index):
                     mon.volatiles.pop(key,None)
     side.active_index = target_slot
+    side.active_pokemon.protean_used = False
     apply_entry_hazards(state, side_idx, target_slot)
+    consume_lum_berry(side.active_pokemon)
     apply_entry_abilities(state, side_idx)
 
 
@@ -371,14 +374,21 @@ def simulate_turn_transition(
                 moved_players.add(player)
                 continue
 
-            # 0. Sucker Punch failure check:
-            # Fails if opponent switched, or opponent used a status move, or opponent already moved!
-            if m_id == "suckerpunch":
+            # These moves require a damaging move still queued for this target.
+            if m_id in ("suckerpunch", "thunderclap"):
                 opp_move = m2 if player == "p1" else m1
                 opp_player = "p2" if player == "p1" else "p1"
-                if opp_move is None or opp_move.category == MoveCategory.STATUS or (opp_player in moved_players):
+                if opp_move is None or (opp_move.category == MoveCategory.STATUS and opp_move.id != "mefirst") or opp_player in moved_players or "mustrecharge" in defender.volatiles:
                     moved_players.add(player)
-                    continue  # Sucker Punch failed!
+                    continue
+
+            battle_weather = effective_weather(s.weather,attacker,defender)
+            # PrepareHit runs after the move's Try check, before Protect/accuracy.
+            if clean_key(attacker.ability) == "protean" and not attacker.protean_used and not attacker.is_terastallized and m_id != "struggle":
+                kind = resolved_move_type(attacker,move,battle_weather,s.terrain)
+                if attacker.active_types != (kind,None) and kind != PokemonType.STELLAR:
+                    attacker.type_override = (kind,None)
+                    attacker.protean_used = True
 
             # 1. Protection moves
             if getattr(move, "is_protect", False) or m_id in ("protect", "spikyshield", "detect", "banefulbunker", "silktrap"):
@@ -411,6 +421,16 @@ def simulate_turn_transition(
                 moved_players.add(player)
                 continue
             if targets_foe and s.terrain==Terrain.PSYCHIC and defender.is_grounded() and execution_priority>0:
+                moved_players.add(player)
+                continue
+            # Gen 9 TryHit absorption precedes accuracy and Substitute.
+            damage_type = resolved_move_type(attacker,move,battle_weather,s.terrain)
+            if targets_foe and clean_key(defender.ability) == "waterabsorb" and damage_type == PokemonType.WATER:
+                defender.heal(max(1,defender.max_hp//4))
+                moved_players.add(player)
+                continue
+            if targets_foe and clean_key(defender.ability) == "flashfire" and damage_type == PokemonType.FIRE:
+                defender.volatiles.setdefault("flashfire",{})
                 moved_players.add(player)
                 continue
             if sample_outcomes and targets_foe and rng.random() >= accuracy_chance(attacker,defender,move,battle_weather):
@@ -549,6 +569,7 @@ def simulate_turn_transition(
                                     if kind in statuses:
                                         defender.status=statuses[kind]
 
+                    consume_lum_berry(defender)
                     total_damage += actual_dmg
                     if actual_dmg == 0:break
                 actual_dmg = total_damage
@@ -721,7 +742,11 @@ def simulate_turn_transition(
                             attacker.heal((attacker.max_hp*2+1)//3)
                             divisor = 0
                         elif battle_weather != Weather.NONE:divisor = 4
-                    if divisor:attacker.heal(attacker.max_hp // divisor)
+                    if divisor:
+                        rounded = m_id not in ("synthesis","moonlight","morningsun","shoreup")
+                        attacker.heal((attacker.max_hp + (divisor//2 if rounded else 0)) // divisor)
+                    if m_id == "roost" and not attacker.is_terastallized:
+                        attacker.volatiles["roost"] = {"duration":1}
             elif m_id == "rest":
                 if attacker.current_hp < attacker.max_hp and attacker.status != StatusCondition.SLEEP and not (attacker.is_grounded() and s.terrain in (Terrain.ELECTRIC,Terrain.MISTY)):
                     attacker.heal(attacker.max_hp)
@@ -743,6 +768,8 @@ def simulate_turn_transition(
                 if PokemonType.ELECTRIC not in target_mon.active_types and PokemonType.GROUND not in target_mon.active_types and t_ab != "goodasgold" and target_mon.status == StatusCondition.NONE and not (target_mon.is_grounded() and s.terrain == Terrain.MISTY):
                     target_mon.status = StatusCondition.PARALYSIS
 
+            consume_lum_berry(attacker)
+            consume_lum_berry(defender)
             moved_players.add(player)
             sync_paradox(s)
             if s.pending_switches:
@@ -848,6 +875,7 @@ def simulate_turn_transition(
 
     if s.is_game_over:return finalized_state(s)
     for side in (s.p1,s.p2):
+        if side.active_pokemon:side.active_pokemon.volatiles.pop("roost",None)
         side.tailwind = max(0,side.tailwind-1)
         side.screens = {name:(turns-1 if turns>0 else turns) for name,turns in side.screens.items() if turns != 1}
     s.trick_room = max(0,s.trick_room-1)

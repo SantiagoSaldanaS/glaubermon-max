@@ -185,6 +185,8 @@ class Pokemon:
     choice_locked_move: Optional[str] = None
     last_move: Optional[str] = None
     move_history_incomplete: bool = False
+    type_override: Optional[Tuple[PokemonType, Optional[PokemonType]]] = None
+    protean_used: bool = False
     raw_stats: Dict[str, int] = field(default_factory=dict)
     volatiles: Dict[str, Any] = field(default_factory=dict)
 
@@ -248,7 +250,15 @@ class Pokemon:
     def active_types(self) -> Tuple[PokemonType, Optional[PokemonType]]:
         if self.is_terastallized and self.tera_type:
             return (self.tera_type, None)
-        return self.types
+        return self.pretera_types
+
+    @property
+    def pretera_types(self):
+        types = self.type_override or self.types
+        if "roost" in self.volatiles:
+            remaining = [t for t in types if t is not None and t != PokemonType.FLYING]
+            return (remaining[0], remaining[1] if len(remaining)>1 else None) if remaining else (PokemonType.NORMAL,None)
+        return types
 
     def get_booster_boosted_stat(self) -> Optional[str]:
         """Determine which stat is heightened by Protosynthesis or Quark Drive."""

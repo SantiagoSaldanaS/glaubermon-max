@@ -1193,6 +1193,11 @@ class ShowdownBot:
         for tag,(_,side) in sides.items():
             for mon in side.pokemon:
                 mon.volatiles = tracker.observations(tag,mon.species,sides)
+                key = (tag,clean_key(mon.species))
+                changed = tracker.type_changes.get(key)
+                if changed:
+                    mon.type_override = (PokemonType(changed[0]),PokemonType(changed[1]) if len(changed)>1 else None)
+                mon.protean_used = key in tracker.protean_used
                 mon.last_move = tracker.last_moves.get((tag,clean_key(mon.species)))
                 if tag == opp_tag:
                     for move in mon.moves:move.pp_known = False

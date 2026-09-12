@@ -72,6 +72,32 @@ def set_terrain(state,terrain,source):
     sync_paradox(state)
 
 
+def resolved_move_type(attacker,move,weather,terrain):
+    move_type=move.move_type
+    if move.id=='ivycudgel':
+        form=clean_key(attacker.species)+' '+clean_key(attacker.item)
+        for name,kind in (('wellspring',PokemonType.WATER),('hearthflame',PokemonType.FIRE),('cornerstone',PokemonType.ROCK)):
+            if name in form:return kind
+    if move.id=='weatherball':
+        return {Weather.SUN:PokemonType.FIRE,Weather.HARSH_SUN:PokemonType.FIRE,
+            Weather.RAIN:PokemonType.WATER,Weather.HEAVY_RAIN:PokemonType.WATER,
+            Weather.SANDSTORM:PokemonType.ROCK,Weather.SNOW:PokemonType.ICE}.get(weather,move_type)
+    if move.id=='terrainpulse' and attacker.is_grounded():
+        return {Terrain.ELECTRIC:PokemonType.ELECTRIC,Terrain.GRASSY:PokemonType.GRASS,
+            Terrain.PSYCHIC:PokemonType.PSYCHIC,Terrain.MISTY:PokemonType.FAIRY}.get(terrain,move_type)
+    return move_type
+
+
+def consume_lum_berry(mon):
+    """Immediate item update, before the next action or multihit strike."""
+    if mon and not mon.is_fainted and clean_key(mon.item)=='lumberry' and (mon.status!=StatusCondition.NONE or 'confusion' in mon.volatiles):
+        mon.item=None
+        mon.status=StatusCondition.NONE
+        mon.status_turns=0
+        mon.toxic_counter=0
+        mon.volatiles.pop('confusion',None)
+
+
 def effective_speed(mon,side,weather,terrain):
     stage=mon.boosts.get('spe',0)
     speed=mon.raw_stats.get('spe',100)

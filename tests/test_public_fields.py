@@ -81,7 +81,7 @@ def test_public_volatiles_are_side_specific_and_keep_hidden_values_unknown():
  assert 'substitute' not in state.p1.active_pokemon.volatiles
  assert state.is_trapped(1)
  tensors=encode_battle_state(state)
- assert tensors[0][1].shape==(6,83)
+ assert tensors[0][1].shape==(6,86)
  assert tensors[1][1][0,64]==-1 and tensors[1][1][0,65]<0
  assert torch.equal(tensors[1][1][0],encode_pokemon(state.p2.active_pokemon,True)[1])
  asyncio.run(b.handle_message('>'+room+'\n|-end|p1a: Great Tusk|confusion\n|switch|p2a: Great Tusk|Great Tusk, L100|100/100'))

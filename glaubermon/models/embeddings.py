@@ -12,9 +12,9 @@ WEATHER_MAP = {w: i for i, w in enumerate(Weather)}
 TERRAIN_MAP = {t: i for i, t in enumerate(Terrain)}
 
 MOVE_DIM = 33
-STAT_DIM = 83
+STAT_DIM = 86
 FIELD_DIM = 40
-FEATURE_SCHEMA = "public_history_v6"
+FEATURE_SCHEMA = "public_callbacks_v7"
 
 
 _MOVE_ENCODING_CACHE: Dict[Tuple, torch.Tensor] = {}
@@ -74,6 +74,10 @@ def encode_restrictions(mon):
     return result
 
 
+def encode_callbacks(mon):
+    return torch.tensor([float(mon.protean_used),float('roost' in mon.volatiles),float('flashfire' in mon.volatiles)],dtype=torch.float32)
+
+
 def encode_pokemon(mon: Optional[Pokemon], is_active: bool = False) -> Tuple[torch.Tensor, torch.Tensor]:
     """Encode a single Pokémon and its 4 moves into moves (4, MOVE_DIM) + stats (STAT_DIM,)."""
     moves_tensor = torch.zeros(4, MOVE_DIM, dtype=torch.float32)
@@ -117,6 +121,7 @@ def encode_pokemon(mon: Optional[Pokemon], is_active: bool = False) -> Tuple[tor
 
     stats_tensor[64:68] = encode_volatiles(mon)
     stats_tensor[68:83] = encode_restrictions(mon)
+    stats_tensor[83:86] = encode_callbacks(mon)
     return moves_tensor, stats_tensor
 
 
@@ -140,6 +145,7 @@ def encode_battle_state(state: BattleState) -> Tuple[Tuple[torch.Tensor, torch.T
                 p1_moves_t[i, j] = encode_move(mon.moves[j])
             p1_stats_t[i, 64:68] = encode_volatiles(mon)
             p1_stats_t[i, 68:83] = encode_restrictions(mon)
+            p1_stats_t[i, 83:86] = encode_callbacks(mon)
             p1_stats_t[i, 1] = mon.hp_percent
             p1_stats_t[i, 2] = 1.0 if i == state.p1.active_index else 0.0
             p1_stats_t[i, 3] = 1.0 if mon.is_terastallized else 0.0
@@ -168,6 +174,7 @@ def encode_battle_state(state: BattleState) -> Tuple[Tuple[torch.Tensor, torch.T
                 p2_moves_t[i, j] = encode_move(mon.moves[j])
             p2_stats_t[i, 64:68] = encode_volatiles(mon)
             p2_stats_t[i, 68:83] = encode_restrictions(mon)
+            p2_stats_t[i, 83:86] = encode_callbacks(mon)
             p2_stats_t[i, 1] = mon.hp_percent
             p2_stats_t[i, 2] = 1.0 if i == state.p2.active_index else 0.0
             p2_stats_t[i, 3] = 1.0 if mon.is_terastallized else 0.0

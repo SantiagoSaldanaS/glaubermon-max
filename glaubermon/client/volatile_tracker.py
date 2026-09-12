@@ -17,6 +17,8 @@ class PublicVolatileTracker:
         self.acted = set()
         self.switched = set()
         self.paradox_source = {}
+        self.type_changes = {}
+        self.protean_used = set()
 
     def identify(self, ident):
         return ident[:2], self.identities.get(ident,clean_key(ident.split(':')[-1]))
@@ -24,6 +26,7 @@ class PublicVolatileTracker:
     def ingest(self, parts):
         if len(parts)>1 and parts[1] == 'upkeep':
             for values in self.mons.values():
+                values.pop('roost',None)
                 for effect in ('encore','disable','taunt'):
                     value = values.get(effect)
                     if value and value.get('duration',-1)>0:
@@ -47,6 +50,8 @@ class PublicVolatileTracker:
                     self.mons.pop(mon_key,None)
                     self.last_moves.pop(mon_key,None)
                     self.paradox_source.pop(mon_key,None)
+                    self.type_changes.pop(mon_key,None)
+                    if mon_key == key:self.protean_used.discard(mon_key)
                     for conditions in self.mons.values():
                         for condition in ('trapped','partiallytrapped'):
                             if conditions.get(condition,{}).get('source') == mon_key:
@@ -77,12 +82,19 @@ class PublicVolatileTracker:
         values = self.mons.setdefault(key,{})
         if command == '-activate' and effect in ('protosynthesis','quarkdrive'):
             self.paradox_source[key]='[fromitem]' in parts[4:]
+        if command == '-singleturn' and effect == 'roost':
+            values[effect] = {'duration':1}
         if command == '-start':
+            if effect == 'typechange' and len(parts)>4:
+                self.type_changes[key] = tuple(parts[4].split('/'))
+                if any('Protean' in p for p in parts[5:]):self.protean_used.add(key)
             for ability in ('protosynthesis','quarkdrive'):
                 stat=effect.removeprefix(ability)
                 if effect.startswith(ability) and stat in ('atk','def','spa','spd','spe'):
                     values[ability]={'best_stat':stat,'from_booster':self.paradox_source.pop(key,None)}
-            if effect == 'substitute':
+            if effect == 'flashfire':
+                values[effect] = {}
+            elif effect == 'substitute':
                 values[effect] = {'hp':-1}
             elif effect in ('encore','disable'):
                 move = clean_key(parts[4]) if effect == 'disable' and len(parts)>4 else self.last_moves.get(key)

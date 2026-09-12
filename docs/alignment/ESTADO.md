@@ -6,6 +6,14 @@ Instrucción de Felipe/Santiago: corregir las diferencias de entorno antes de re
 
 El cierre se limita a los equipos actuales: [criterios y pendientes concretos](CIERRE_PILOTO.md). El inventario fijado incluye 57 movimientos, 16 habilidades y 13 objetos. Las mecánicas ajenas a esos sets ya no bloquean por sí mismas este primer piloto.
 
+## Sexta tanda: callbacks de los equipos actuales
+
+- Thunderclap/Sucker Punch verifican que el rival tenga un ataque pendiente; fallan frente a estado, cambio y después de actuar. Water Absorb cura antes de precisión/Substitute y detiene Flip Turn. Flash Fire absorbe también estado, conserva el aumento ofensivo y se limpia al cambiar.
+- Lum Berry se consume y cura estado/confusión antes de la siguiente acción, entre impactos y después de Toxic Spikes; no se consume a través de Substitute ni después de un KO.
+- Protean cambia el tipo antes de Protect/precisión, una vez por entrada; un tipo ya coincidente no gasta la activación. Roost elimina Flying durante ese turno, conserva la fase interrumpida por pivote y respeta Tera. Los tipos originales se conservan separados de los actuales; ambos influyen correctamente en STAB.
+- Contrato `public_callbacks_v7`: 86 características por Pokémon, con tres señales nuevas (Protean usado, Roost y Flash Fire). Protocolo → estado → tensores conserva las señales y el aislamiento; importar pesos de 83 columnas agrega ceros sin reescribir archivos. Estas señales todavía no están aprendidas.
+- Evidencia: 40 secuencias oficiales y cuatro familias de daño de 256 batallas (Flash Fire físico/especial y Protean antes/después de usarlo). Suite completa: **454 pruebas aprobadas**. Total: **20,205 ejecuciones oficiales controladas**, más la secuencia del adaptador para PP/Struggle. Las 24 partidas de integración registradas corresponden a versiones anteriores; falta repetirlas sobre esta tanda.
+
 ## Quinta tanda: historial, activaciones y Body Press
 
 - Struggle deja de reemplazar el moveset propio. Se conserva el historial de PP por partida/Pokémon, incluidos gasto observado, Pressure y exclusión de movimientos llamados. El menú temporal sigue siendo autoritativo para la acción actual. Una observación tardía sin PP previos conserva incertidumbre; no inventa agotamiento ni disponibilidad futura.
@@ -61,8 +69,8 @@ Referencia: paquete fijado **Pokémon Showdown 0.11.11**, Gen 9 custom game, con
 - Tercera batería: 77 secuencias deterministas, 12 familias de daño (256 cada una), 6 de cantidad de impactos (512 cada una), Triple Axel por impacto (256) y 5 de precisión por clima (512 cada una).
 - Cuarta batería: 40 secuencias deterministas de restricciones y Leech Seed, más 512 batallas para precisión de Leech Seed. Incluye PP, último movimiento, expiración, casos de KO, prioridad y efecto de Trick Room sobre residuales simultáneos.
 - Quinta batería: 17 secuencias de activación Paradox, 8 familias de daño Paradox (256 cada una), 5 familias de Body Press (256 cada una) y una de críticos (512). Adicionalmente se prueba una secuencia oficial por el adaptador real para historial/Struggle.
-- Total de fixtures controlados: **19,141 ejecuciones oficiales**. Se comparan HP, estado, PP, boosts, objetos, volátiles, hazards, jugador que debe reemplazar y contador de turno. En los casos aleatorios se comparan soportes/frecuencias con tolerancias explícitas, no resultados idénticos por semilla: los RNG son diferentes.
-- Suite completa: **407 pruebas aprobadas**, incluyendo protocolo→tensores, aislamiento entre lados, compatibilidad de pesos, independencia de ramas y bloqueo de entrenamiento.
+- Total hasta la quinta tanda: **19,141 ejecuciones oficiales**. Se comparan HP, estado, PP, boosts, objetos, volátiles, hazards, jugador que debe reemplazar y contador de turno. En los casos aleatorios se comparan soportes/frecuencias con tolerancias explícitas, no resultados idénticos por semilla: los RNG son diferentes.
+- Suite de la quinta tanda: **407 pruebas aprobadas**, incluyendo protocolo→tensores, aislamiento entre lados, compatibilidad de pesos, independencia de ramas y bloqueo de entrenamiento.
 
 Además, se completaron 24 partidas locales de integración sin acciones inválidas, fallbacks ni timeouts. Cuatro corresponden a la quinta tanda, con movimientos de 33 características y pesos congelados (30/27 turnos de desarrollo y 21/24 de control). Cuatro corresponden a la cuarta tanda, con observaciones de 83 características y pesos congelados. Sus equipos no llevan Encore/Disable/Leech Seed: la validación mecánica proviene de fixtures. Otras cuatro corresponden a la tercera tanda: dos entre equipos de desarrollo y dos de control a profundidad 2. Triple Axel no fue elegido en esas partidas; se valida por impacto en fixtures. En la comparación histórica de la tanda anterior, la evaluación por lotes conservó las decisiones de las dos partidas comparadas y redujo el máximo observado de 26.787 a 15.534 s. Detalle y fuentes: [INTEGRACION.md](INTEGRACION.md).
 

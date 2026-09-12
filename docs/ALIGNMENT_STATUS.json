@@ -1,10 +1,10 @@
 {
   "training_allowed": false,
   "reason": "Felipe/Santiago require environment alignment before another training run (2026-09-11).",
-  "feature_schema": "public_history_v6",
+  "feature_schema": "public_callbacks_v7",
   "official_reference": "pokemon-showdown@0.11.11",
   "remaining": [
-    "Audit current-team effects: Protean, Roost typing, Thunderclap, absorption callbacks, Lum Berry and damage modifiers/rounding",
+    "Audit current-team damage modifiers/rounding and Ogerpon Wellspring Terastallization callbacks",
     "Validate simultaneous entry effects for the pinned current-team pool",
     "Compare full official trajectories and legal action/state transitions across the pinned team pool"
   ],

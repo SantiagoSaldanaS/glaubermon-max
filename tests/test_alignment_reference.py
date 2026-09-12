@@ -48,9 +48,14 @@ def from_snapshot(data):
    moves=[]
    for m in p['moves']:
     move=Move.from_dex(m['id']);move.pp=m['pp'];move.max_pp=m['maxpp'];moves.append(move)
-   types=[PokemonType(t) for t in p['types']]
+   types=[PokemonType(t) for t in p.get('baseTypes',p['types'])]
    mons.append(Pokemon(species=p['species'],types=(types[0],types[1] if len(types)>1 else None),current_hp=p['hp'],max_hp=p['maxhp'],
       last_move=p.get('lastMove'),level=p.get('level',100),volatiles=deepcopy(p.get('volatiles',{})),raw_stats={'hp':p['maxhp'],**p['stats']},ability=p['ability'],item=p['item'],status=STATUS[p['status']],status_turns=p['time'],boosts=p['boosts'].copy(),moves=moves))
+   if p.get('rawTypes') and p['rawTypes'] != p.get('baseTypes'):
+    raw=[PokemonType(t) for t in p['rawTypes']];mons[-1].type_override=(raw[0],raw[1] if len(raw)>1 else None)
+   mons[-1].protean_used=p.get('proteanUsed',False)
+   mons[-1].is_terastallized=bool(p.get('tera'))
+   if p.get('teraType'):mons[-1].tera_type=PokemonType(p['teraType'])
    for key in ('protosynthesis','quarkdrive'):
     if key in mons[-1].volatiles:mons[-1].booster_stat=mons[-1].volatiles[key]['best_stat']
    mons[-1].shield_boosted=p.get('shieldBoost',False)

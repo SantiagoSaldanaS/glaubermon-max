@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple, Any
 from glaubermon.core.types import PokemonType, MoveCategory, Weather, Terrain, StatusCondition
 from glaubermon.core.constants import get_type_effectiveness, clean_key
 from glaubermon.core.pokemon import Pokemon, Move
-from glaubermon.core.field_mechanics import effective_weather, poke_round, paradox_environment, best_paradox_stat
+from glaubermon.core.field_mechanics import effective_weather, poke_round, paradox_environment, best_paradox_stat, resolved_move_type
 
 
 SLICING_MOVES = {
@@ -121,23 +121,11 @@ def calculate_damage_rolls(
     if getattr(defender, "is_protected", False):
         return [0] * 16
 
-    # 3. Dynamic move typing (e.g. Ivy Cudgel changes type with Ogerpon's mask)
-    move_type = move.move_type
-    if m_id == "ivycudgel":
-        if attacker.species == "Ogerpon-Wellspring" or (attacker.item and "wellspring" in attacker.item.lower()):
-            move_type = PokemonType.WATER
-        elif attacker.species == "Ogerpon-Hearthflame" or (attacker.item and "hearthflame" in attacker.item.lower()):
-            move_type = PokemonType.FIRE
-        elif attacker.species == "Ogerpon-Cornerstone" or (attacker.item and "cornerstone" in attacker.item.lower()):
-            move_type = PokemonType.ROCK
-
-    if m_id == "weatherball":
-        move_type = {Weather.SUN:PokemonType.FIRE,Weather.RAIN:PokemonType.WATER,
-                     Weather.SANDSTORM:PokemonType.ROCK,Weather.SNOW:PokemonType.ICE,
-                     Weather.HARSH_SUN:PokemonType.FIRE,Weather.HEAVY_RAIN:PokemonType.WATER}.get(weather,move_type)
-    if m_id == "terrainpulse" and attacker.is_grounded():
-        move_type = {Terrain.ELECTRIC:PokemonType.ELECTRIC,Terrain.GRASSY:PokemonType.GRASS,
-                     Terrain.PSYCHIC:PokemonType.PSYCHIC,Terrain.MISTY:PokemonType.FAIRY}.get(terrain,move_type)
+    move_type = resolved_move_type(attacker,move,weather,terrain)
+    if clean_key(attacker.ability) == "protean" and not attacker.protean_used and not attacker.is_terastallized and m_id != "struggle" and move_type != PokemonType.STELLAR:
+        attacker=attacker.clone()
+        attacker.type_override=(move_type,None)
+        attacker.protean_used=True
 
     def_ability = (defender.ability or "").lower().replace("-", "").replace(" ", "")
     atk_ability = (attacker.ability or "").lower().replace("-", "").replace(" ", "")
@@ -238,6 +226,9 @@ def calculate_damage_rolls(
     if move.category == MoveCategory.SPECIAL and atk_ability == "solarpower" and weather in (Weather.SUN,Weather.HARSH_SUN):
         atk = poke_round(atk*6144)
 
+    if atk_ability == "flashfire" and "flashfire" in attacker.volatiles and move_type == PokemonType.FIRE:
+        atk = poke_round(atk*6144)
+
     crit_mult = 2.25 if (is_critical and atk_ability == "sniper") else (1.5 if is_critical else 1.0)
 
     effective_bp = move.base_power
@@ -280,7 +271,7 @@ def calculate_damage_rolls(
 
     # 9. STAB (Same Type Attack Bonus) with Terastallization & Adaptability
     stab_mult = 1.0
-    base_types = [t for t in attacker.types if t is not None]
+    base_types = [t for t in attacker.pretera_types if t is not None]
     has_adaptability = (atk_ability == "adaptability")
 
     if attacker.is_terastallized and attacker.tera_type:
