@@ -257,6 +257,7 @@ class ShowdownBot:
         self.room_turn: Dict[str, int] = {}
         self.public_fields = {}
         self.public_volatiles = {}
+        self.own_move_history = {}
         self.active_species_by_side = {}
         self.revealed_items = {}
         self.revealed_abilities = {}
@@ -335,6 +336,8 @@ class ShowdownBot:
                 self.public_fields.setdefault(room, PublicFieldTracker()).ingest(parts)
                 from glaubermon.client.volatile_tracker import PublicVolatileTracker
                 self.public_volatiles.setdefault(room, PublicVolatileTracker()).ingest(parts)
+                from glaubermon.client.own_move_history import OwnMoveHistory
+                self.own_move_history.setdefault(room,OwnMoveHistory(self.dex)).ingest(parts)
 
             # 1. Handle Login Challenge String
             if command == "challstr":
@@ -954,24 +957,9 @@ class ShowdownBot:
                     pass
 
             is_active_mon = (i == p1_active_idx)
-            m_list = active_moves if (is_active_mon and active_moves) else p.get("moves", [])
-            moves = []
-            for m in m_list:
-                # Retain all move slots in exact cartridge order so move_slot = i + 1 aligns with Showdown slots (1-4)
-                if isinstance(m, dict):
-                    m_id = m.get("id", "")
-                    move_obj = self.dex.get_move(m_id)
-                    is_dis = bool(m.get("disabled", False))
-                    pp_val = int(m.get("pp", 10))
-                    # A temporary restriction does not consume the move's PP.
-                    move_obj.pp = pp_val
-                    move_obj.request_disabled = is_dis
-                    if "maxpp" in m:
-                        move_obj.max_pp = int(m["maxpp"])
-                    moves.append(move_obj)
-                else:
-                    m_id = str(m)
-                    moves.append(self.dex.get_move(m_id))
+            from glaubermon.client.own_move_history import OwnMoveHistory
+            history = self.own_move_history.setdefault(room,OwnMoveHistory(self.dex))
+            moves = history.observe(p, active_moves if is_active_mon else None)
 
             matching = [m for m in meta_sample if clean_key(m.species) == clean_key(spec)]
             
@@ -1206,8 +1194,16 @@ class ShowdownBot:
             for mon in side.pokemon:
                 mon.volatiles = tracker.observations(tag,mon.species,sides)
                 mon.last_move = tracker.last_moves.get((tag,clean_key(mon.species)))
+                if tag == opp_tag:
+                    for move in mon.moves:move.pp_known = False
                 for flag in tracker.entry_once.get((tag,clean_key(mon.species)),set()):
                     setattr(mon,flag,True)
+        if p1_side.active_pokemon and active_moves and all(m.get("id")=="struggle" for m in active_moves):
+            mon = p1_side.active_pokemon
+            # With neither PP history nor a known restriction, future availability
+            # is unknown. Keep the authoritative Struggle menu conservatively.
+            if any(not m.pp_known for m in mon.moves) and not any(k in mon.volatiles for k in ("encore","disable","taunt")):
+                mon.move_history_incomplete = True
         if p1_side.active_pokemon and req.get("active",[{}])[0].get("trapped"):
             p1_side.active_pokemon.volatiles["request_trapped"] = {}
 
@@ -1364,7 +1360,7 @@ class ShowdownBot:
                     p1_actions_override = filtered_actions
                 if len(legal_move_slots) == 1 and p1_act:
                     it = clean_key(p1_act.item)
-                    if it in ("choicespecs", "choiceband", "choicescarf"):
+                    if it in ("choicespecs", "choiceband", "choicescarf") and active_req_moves[legal_move_slots[0]-1].get("id") != "struggle":
                         p1_act.choice_locked_move = active_req_moves[legal_move_slots[0] - 1].get("id", "")
             else:
                 switches_only = [a for a in current_actions if a.action_type == ActionType.SWITCH]

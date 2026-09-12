@@ -1,13 +1,17 @@
 {
   "training_allowed": false,
   "reason": "Felipe/Santiago require environment alignment before another training run (2026-09-11).",
-  "feature_schema": "public_restrictions_v5",
+  "feature_schema": "public_history_v6",
   "official_reference": "pokemon-showdown@0.11.11",
   "remaining": [
-    "Extend oracle coverage to simultaneous entry callbacks and remaining pivot moves (Baton Pass, Shed Tail, Parting Shot, Teleport)",
-    "Extend volatile coverage to remaining effects and called/transformed moves; represent uncertain public timers and move identities as beliefs",
-    "Extend weather/terrain coverage to simultaneous setters, primal weather, persistent Protosynthesis/Quark Drive activation state and remaining dynamic-power callbacks",
-    "Audit remaining item/ability callbacks and modifier rounding",
-    "Compare full official trajectories and search-state transitions across current team pools"
+    "Audit current-team effects: Protean, Roost typing, Thunderclap, absorption callbacks, Lum Berry and damage modifiers/rounding",
+    "Validate simultaneous entry effects for the pinned current-team pool",
+    "Compare full official trajectories and legal action/state transitions across the pinned team pool"
+  ],
+  "pilot_scope": "docs/alignment/pilot-scope.json",
+  "deferred_outside_pilot_scope": [
+    "Moves/abilities/items absent from pilot-scope.json unless triggered by the selected evaluation opponent",
+    "General equivalence across every Showdown format and team",
+    "Large-scale retraining and SOTA evaluation remain separate milestones"
   ]
 }

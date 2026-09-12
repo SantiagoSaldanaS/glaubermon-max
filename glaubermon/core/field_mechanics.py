@@ -17,17 +17,59 @@ def effective_weather(weather,*mons):
     return Weather.NONE if any(mon and not mon.is_fainted and clean_key(mon.ability) in ('cloudnine','airlock') for mon in mons) else weather
 
 
+def best_paradox_stat(mon):
+    def value(stat):
+        raw,stage=mon.raw_stats.get(stat,100),mon.boosts.get(stat,0)
+        return raw*(2+stage)//2 if stage>=0 else raw*2//(2-stage)
+    return max(('atk','def','spa','spd','spe'),key=value)
+
+
+def paradox_environment(mon,weather,terrain):
+    ability=clean_key(mon.ability)
+    return (ability=='protosynthesis' and weather==Weather.SUN) or (ability=='quarkdrive' and terrain==Terrain.ELECTRIC)
+
+
+def sync_paradox(state):
+    weather=effective_weather(state.weather,state.p1.active_pokemon,state.p2.active_pokemon)
+    for side in (state.p1,state.p2):
+        mon=side.active_pokemon
+        if not mon or mon.is_fainted:continue
+        ability=clean_key(mon.ability)
+        if ability not in ('protosynthesis','quarkdrive'):continue
+        effect=mon.volatiles.get(ability)
+        active=paradox_environment(mon,weather,state.terrain)
+        if effect and effect.get('from_booster') is False and not active:
+            mon.volatiles.pop(ability)
+            mon.booster_stat=None
+            effect=None
+        if effect:
+            mon.booster_stat=effect['best_stat']
+            continue
+        if active:
+            mon.booster_stat=best_paradox_stat(mon)
+            mon.volatiles[ability]={'best_stat':mon.booster_stat,'from_booster':False}
+        elif clean_key(mon.item)=='boosterenergy':
+            mon.booster_stat=best_paradox_stat(mon)
+            mon.item=None
+            mon.volatiles[ability]={'best_stat':mon.booster_stat,'from_booster':True}
+        elif mon.booster_stat:
+            # Legacy/public state can reveal the stat without revealing its source.
+            mon.volatiles[ability]={'best_stat':mon.booster_stat,'from_booster':None}
+
+
 def set_weather(state,weather,source):
     if state.weather == weather:return
     state.weather=weather
     rock={Weather.SUN:'heatrock',Weather.RAIN:'damprock',Weather.SANDSTORM:'smoothrock',Weather.SNOW:'icyrock'}.get(weather)
     state.weather_turns=8 if clean_key(source.item)==rock else 5
+    sync_paradox(state)
 
 
 def set_terrain(state,terrain,source):
     if state.terrain == terrain:return
     state.terrain=terrain
     state.terrain_turns=8 if clean_key(source.item)=='terrainextender' else 5
+    sync_paradox(state)
 
 
 def effective_speed(mon,side,weather,terrain):
@@ -43,10 +85,9 @@ def effective_speed(mon,side,weather,terrain):
         (ability=='surgesurfer' and terrain==Terrain.ELECTRIC)):
         mods.append(8192)
     if ability=='quickfeet' and mon.status!=StatusCondition.NONE:mods.append(6144)
-    if (mon.booster_stat or mon.get_booster_boosted_stat())=='spe':mods.append(6144)
-    elif ((ability=='protosynthesis' and weather in (Weather.SUN,Weather.HARSH_SUN)) or
-          (ability=='quarkdrive' and terrain==Terrain.ELECTRIC)) and max(('atk','def','spa','spd','spe'),key=lambda stat: mon.raw_stats.get(stat,100)*(2+max(0,mon.boosts.get(stat,0)))/(2-min(0,mon.boosts.get(stat,0))))=='spe':
-        mods.append(6144)
+    boosted = mon.booster_stat or mon.get_booster_boosted_stat()
+    if boosted is None and paradox_environment(mon,weather,terrain):boosted = best_paradox_stat(mon)
+    if boosted == 'spe':mods.append(6144)
     if item=='choicescarf':mods.append(6144)
     if item in ('ironball','machobrace','poweranklet','powerband','powerbelt','powerbracer','powerlens','powerweight'):mods.append(2048)
     if side is not None and side.tailwind:mods.append(8192)
@@ -85,6 +126,7 @@ def weather_residual(state):
     if state.weather_turns>0:
         state.weather_turns-=1
         if state.weather_turns==0:state.weather=Weather.NONE
+    sync_paradox(state)
     weather=effective_weather(state.weather,state.p1.active_pokemon,state.p2.active_pokemon)
     for side in (state.p1,state.p2):
         mon=side.active_pokemon

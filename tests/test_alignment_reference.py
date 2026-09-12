@@ -51,6 +51,8 @@ def from_snapshot(data):
    types=[PokemonType(t) for t in p['types']]
    mons.append(Pokemon(species=p['species'],types=(types[0],types[1] if len(types)>1 else None),current_hp=p['hp'],max_hp=p['maxhp'],
       last_move=p.get('lastMove'),level=p.get('level',100),volatiles=deepcopy(p.get('volatiles',{})),raw_stats={'hp':p['maxhp'],**p['stats']},ability=p['ability'],item=p['item'],status=STATUS[p['status']],status_turns=p['time'],boosts=p['boosts'].copy(),moves=moves))
+   for key in ('protosynthesis','quarkdrive'):
+    if key in mons[-1].volatiles:mons[-1].booster_stat=mons[-1].volatiles[key]['best_stat']
    mons[-1].shield_boosted=p.get('shieldBoost',False)
    mons[-1].sword_boosted=p.get('swordBoost',False)
   sides.append(BattleSide(mons,active_index=side['active'],hazards={hazard_keys[k]:v for k,v in side.get('hazards',{}).items()},screens=side['screens'].copy(),tailwind=side['tailwind']))

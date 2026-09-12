@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple, Any
 from glaubermon.core.types import PokemonType, MoveCategory, Weather, Terrain, StatusCondition
 from glaubermon.core.constants import get_type_effectiveness, clean_key
 from glaubermon.core.pokemon import Pokemon, Move
-from glaubermon.core.field_mechanics import effective_weather, poke_round
+from glaubermon.core.field_mechanics import effective_weather, poke_round, paradox_environment, best_paradox_stat
 
 
 SLICING_MOVES = {
@@ -96,6 +96,11 @@ def calculate_damage_rolls(
     m_id = move.id.lower().replace(" ", "").replace("-", "")
 
     weather = effective_weather(weather,attacker,defender)
+    # Standalone damage queries may not have a BattleState activation callback.
+    if not attacker.booster_stat and paradox_environment(attacker,weather,terrain):
+        attacker=attacker.clone();attacker.booster_stat=best_paradox_stat(attacker)
+    if not defender.booster_stat and paradox_environment(defender,weather,terrain):
+        defender=defender.clone();defender.booster_stat=best_paradox_stat(defender)
 
     # Fixed damage still respects type immunity.
     if m_id in ("nightshade","seismictoss","superfang"):
@@ -188,13 +193,21 @@ def calculate_damage_rolls(
     ignore_atk_boosts = (def_ability == "unaware")
     ignore_def_boosts = (atk_ability == "unaware")
     if is_critical:
-        attack_stat = "atk" if move.category == MoveCategory.PHYSICAL else "spa"
+        attack_stat = "def" if m_id == "bodypress" else ("atk" if move.category == MoveCategory.PHYSICAL else "spa")
         defense_stat = "def" if move.category == MoveCategory.PHYSICAL else "spd"
         ignore_atk_boosts |= attacker.boosts.get(attack_stat, 0) < 0
         ignore_def_boosts |= defender.boosts.get(defense_stat, 0) > 0
 
     if move.category == MoveCategory.PHYSICAL:
-        atk = attacker.effective_stat("atk", ignore_boosts=ignore_atk_boosts)
+        offense = attacker
+        if m_id == "bodypress":
+            # Body Press substitutes Defense's raw stat/stages but still runs
+            # Attack modifiers (Band, not Eviolite/Fur Coat/Snow's Defense boost).
+            offense = attacker.clone()
+            offense.booster_stat = attacker.booster_stat or attacker.get_booster_boosted_stat()
+            offense.raw_stats["atk"] = attacker.raw_stats["def"]
+            offense.boosts["atk"] = attacker.boosts.get("def",0)
+        atk = offense.effective_stat("atk", ignore_boosts=ignore_atk_boosts)
         defense = defender.effective_stat("def", ignore_boosts=ignore_def_boosts)
         if atk_ability in ("hugepower", "purepower"):
             atk = int(atk * 2.0)

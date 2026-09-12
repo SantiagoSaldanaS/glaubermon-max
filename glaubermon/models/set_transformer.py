@@ -123,6 +123,9 @@ class GlaubermonMaxNet(nn.Module):
         only future training can learn to use these new neural features.
         """
         weights = dict(weights)
+        old_move = weights.get("move_fc.0.weight")
+        if old_move is not None and old_move.shape[1] == 32:
+            weights["move_fc.0.weight"] = torch.nn.functional.pad(old_move,(0,MOVE_DIM-32))
         old = weights.get("field_fc.0.weight")
         if old is not None and old.shape[1] == 16:
             weights["field_fc.0.weight"] = torch.nn.functional.pad(old,(0,24))
@@ -138,6 +141,8 @@ class GlaubermonMaxNet(nn.Module):
     def _encode_team(self, moves_t: torch.Tensor, stats_t: torch.Tensor) -> torch.Tensor:
         # moves_t: (batch, 6, 4, MOVE_DIM)
         # stats_t: (batch, 6, STAT_DIM)
+        if moves_t.shape[-1] == 32:
+            moves_t = torch.nn.functional.pad(moves_t,(0,MOVE_DIM-32))
         b, num_mons, num_moves, m_dim = moves_t.shape
 
         # Encode moves and pool across the 4 moves

@@ -12,7 +12,7 @@ from glaubermon.inference.damage_calc import calculate_damage_rolls, is_contact_
 from glaubermon.search.evaluators import StateEvaluator, HeuristicEvaluator
 from glaubermon.search.matrix_solver import solve_zero_sum_game
 from glaubermon.core.field_mechanics import (effective_weather,effective_speed,move_priority,accuracy_chance,
-    set_weather,set_terrain,weather_residual,hit_count,WEATHER_MOVES,WEATHER_ABILITIES,TERRAIN_MOVES,TERRAIN_ABILITIES)
+    set_weather,set_terrain,sync_paradox,weather_residual,hit_count,WEATHER_MOVES,WEATHER_ABILITIES,TERRAIN_MOVES,TERRAIN_ABILITIES)
 
 
 def speed_order_key(mon, side, state):
@@ -70,6 +70,7 @@ def apply_entry_abilities(state,side_idx):
     ability = clean_key(mon.ability)
     if ability in WEATHER_ABILITIES:set_weather(state,WEATHER_ABILITIES[ability],mon)
     if ability in TERRAIN_ABILITIES:set_terrain(state,TERRAIN_ABILITIES[ability],mon)
+    sync_paradox(state)
     if ability in ("dauntlessshield","intrepidsword"):
         flag = "shield_boosted" if ability == "dauntlessshield" else "sword_boosted"
         if not getattr(mon,flag,False):
@@ -129,7 +130,11 @@ def finalized_state(state):
     # Showdown clears volatile conditions when a faint is processed.
     for side in (state.p1,state.p2):
         for mon in side.pokemon:
-            if mon.is_fainted:mon.volatiles.clear()
+            if mon.is_fainted:
+                mon.volatiles.clear()
+                mon.boosts = {stat:0 for stat in mon.boosts}
+                mon.booster_stat = None
+                mon.choice_locked_move = None
     return state
 
 
@@ -151,6 +156,7 @@ def simulate_turn_transition(
     """
     rng = rng if rng is not None else random
     s = state.clone()
+    sync_paradox(s)
     for side in (s.p1,s.p2):
         for mon in side.pokemon:
             for move in mon.moves:move.request_disabled = False
@@ -738,6 +744,7 @@ def simulate_turn_transition(
                     target_mon.status = StatusCondition.PARALYSIS
 
             moved_players.add(player)
+            sync_paradox(s)
             if s.pending_switches:
                 remaining = []
                 for who, queued_move in order[order_index+1:]:
@@ -847,6 +854,7 @@ def simulate_turn_transition(
     if s.terrain_turns > 0:
         s.terrain_turns -= 1
         if s.terrain_turns == 0:s.terrain = Terrain.NONE
+    sync_paradox(s)
     s.pending_switches = tuple(i for i,side in ((1,s.p1),(2,s.p2))
         if side.active_pokemon and side.active_pokemon.is_fainted and not side.is_all_fainted)
     if not s.pending_switches and not s.is_game_over:

@@ -3,8 +3,8 @@ const {Battle}=require(process.argv[2]);
 const input=JSON.parse(require('fs').readFileSync(0,'utf8'));
 function mon(p) {return {species:p.species.name,level:p.level,types:p.getTypes(),hp:p.hp,maxhp:p.maxhp,stats:{...p.storedStats},
  lastMove:p.lastMove?.id||null,shieldBoost:!!p.shieldBoost,swordBoost:!!p.swordBoost,ability:p.ability,item:p.item,status:p.status,time:p.statusState.time||0,boosts:{...p.boosts},
- volatiles:Object.fromEntries(['substitute','taunt','confusion','partiallytrapped','trapped','encore','disable','leechseed'].filter(k=>p.volatiles[k]).map(k=>{
- const v=p.volatiles[k];return [k,{...(v.move?{move:v.move}:{}),...(k==='leechseed'?{source_side:Number(v.sourceSlot[1])}:{}),...(v.hp!==undefined?{hp:v.hp}:{}),...(v.duration!==undefined?{duration:v.duration}:{}),
+ volatiles:Object.fromEntries(['substitute','taunt','confusion','partiallytrapped','trapped','encore','disable','leechseed','protosynthesis','quarkdrive'].filter(k=>p.volatiles[k]).map(k=>{
+ const v=p.volatiles[k];return [k,{...(v.bestStat?{best_stat:v.bestStat,from_booster:!!v.fromBooster}:{}),...(v.move?{move:v.move}:{}),...(k==='leechseed'?{source_side:Number(v.sourceSlot[1])}:{}),...(v.hp!==undefined?{hp:v.hp}:{}),...(v.duration!==undefined?{duration:v.duration}:{}),
  ...(v.time!==undefined?{time:v.time}:{}),...(v.boundDivisor?{divisor:v.boundDivisor}:{}),
  ...(['partiallytrapped','trapped'].includes(k)&&v.source?{source:[v.source.side.n+1,v.source.species.name]}:{})}];})),
  moves:p.moveSlots.map(m=>({id:m.id,pp:m.pp,maxpp:m.maxpp}))};}

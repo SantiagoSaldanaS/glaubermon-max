@@ -11,18 +11,18 @@ STATUS_MAP = {s: i for i, s in enumerate(StatusCondition)}
 WEATHER_MAP = {w: i for i, w in enumerate(Weather)}
 TERRAIN_MAP = {t: i for i, t in enumerate(Terrain)}
 
-MOVE_DIM = 32
+MOVE_DIM = 33
 STAT_DIM = 83
 FIELD_DIM = 40
-FEATURE_SCHEMA = "public_restrictions_v5"
+FEATURE_SCHEMA = "public_history_v6"
 
 
 _MOVE_ENCODING_CACHE: Dict[Tuple, torch.Tensor] = {}
 
 
 def encode_move(move: Move) -> torch.Tensor:
-    """Encode a single move into a 1D feature vector of size 32 (with memoization)."""
-    key = (move.base_power, move.accuracy, move.priority, move.pp, move.move_type, move.category)
+    """Encode a single move into a 1D feature vector of size MOVE_DIM (with memoization)."""
+    key = (move.base_power, move.accuracy, move.priority, move.pp, move.move_type, move.category, move.pp_known)
     cached = _MOVE_ENCODING_CACHE.get(key)
     if cached is not None:
         return cached.clone()
@@ -32,6 +32,7 @@ def encode_move(move: Move) -> torch.Tensor:
     vec[1] = move.accuracy
     vec[2] = (move.priority + 3) / 8.0  # Priority typically -3 to +5
     vec[3] = move.pp / 40.0
+    vec[32] = float(move.pp_known)
 
     # Move Type one-hot (indices 4 to 22)
     type_idx = TYPE_MAP.get(move.move_type, 0)
@@ -74,7 +75,7 @@ def encode_restrictions(mon):
 
 
 def encode_pokemon(mon: Optional[Pokemon], is_active: bool = False) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Encode a single Pokémon and its 4 moves into moves (4, 32) + stats (STAT_DIM,)."""
+    """Encode a single Pokémon and its 4 moves into moves (4, MOVE_DIM) + stats (STAT_DIM,)."""
     moves_tensor = torch.zeros(4, MOVE_DIM, dtype=torch.float32)
     stats_tensor = torch.zeros(STAT_DIM, dtype=torch.float32)
 
@@ -123,8 +124,8 @@ def encode_battle_state(state: BattleState) -> Tuple[Tuple[torch.Tensor, torch.T
     """Convert entire 6v6 BattleState into model-ready PyTorch tensors with preallocated buffers.
 
     Returns:
-        p1_tensor: Tuple of (moves (6, 4, 32), stats (6, STAT_DIM))
-        p2_tensor: Tuple of (moves (6, 4, 32), stats (6, STAT_DIM))
+        p1_tensor: Tuple of (moves (6, 4, MOVE_DIM), stats (6, STAT_DIM))
+        p2_tensor: Tuple of (moves (6, 4, MOVE_DIM), stats (6, STAT_DIM))
         field_tensor: Tensor of shape (40,) containing weather, terrain, hazards
     """
     p1_moves_t = torch.zeros(6, 4, MOVE_DIM, dtype=torch.float32)

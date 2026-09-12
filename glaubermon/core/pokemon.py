@@ -44,6 +44,7 @@ class Move:
     multiaccuracy: bool = False
     fail_encore: bool = False
     request_disabled: bool = False
+    pp_known: bool = True
 
     def clone(self) -> "Move":
         """Copy mutable battle data without reloading or reinterpreting the Dex."""
@@ -183,6 +184,7 @@ class Pokemon:
     booster_stat: Optional[str] = None
     choice_locked_move: Optional[str] = None
     last_move: Optional[str] = None
+    move_history_incomplete: bool = False
     raw_stats: Dict[str, int] = field(default_factory=dict)
     volatiles: Dict[str, Any] = field(default_factory=dict)
 
@@ -257,15 +259,8 @@ class Pokemon:
         if item_clean != "boosterenergy":
             return None
 
-        candidates = ["atk", "def", "spa", "spd", "spe"]
-        best_stat = "atk"
-        best_val = -1
-        for s in candidates:
-            val = self.raw_stats.get(s, 100)
-            if val > best_val:
-                best_val = val
-                best_stat = s
-        return best_stat
+        from glaubermon.core.field_mechanics import best_paradox_stat
+        return best_paradox_stat(self)
 
     def effective_stat(self, stat_name: str, ignore_boosts: bool = False) -> int:
         """Compute the current in-battle stat value including stage boosts, items, and abilities."""
@@ -280,7 +275,7 @@ class Pokemon:
             if stat_name == "spe":
                 stat = int(stat * 1.5)
             else:
-                stat = int(stat * 1.3)
+                stat = (stat*5325+2047)//4096
 
         item_clean = clean_key(self.item)
         if stat_name == "spe":

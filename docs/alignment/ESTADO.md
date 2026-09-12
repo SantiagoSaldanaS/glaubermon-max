@@ -2,6 +2,18 @@
 
 Instrucción de Felipe/Santiago: corregir las diferencias de entorno antes de reentrenar. `AlphaZeroTrainer.train()` rechaza corridas mientras `docs/ALIGNMENT_STATUS.json` no permita entrenar. No se inició reentrenamiento en estas tandas; las pruebas de optimizador usan modelos desechables. Los checkpoints originales se conservan.
 
+## Cierre acotado del piloto
+
+El cierre se limita a los equipos actuales: [criterios y pendientes concretos](CIERRE_PILOTO.md). El inventario fijado incluye 57 movimientos, 16 habilidades y 13 objetos. Las mecánicas ajenas a esos sets ya no bloquean por sí mismas este primer piloto.
+
+## Quinta tanda: historial, activaciones y Body Press
+
+- Struggle deja de reemplazar el moveset propio. Se conserva el historial de PP por partida/Pokémon, incluidos gasto observado, Pressure y exclusión de movimientos llamados. El menú temporal sigue siendo autoritativo para la acción actual. Una observación tardía sin PP previos conserva incertidumbre; no inventa agotamiento ni disponibilidad futura.
+- Encore, Disable y Taunt llevan duración finita cuando el registro público permite inferirla, incluyendo antes/después de actuar y reemplazos. Una secuencia oficial completa reproduce Encore + Disable → Struggle → recuperación de Surf conservando los PP originales.
+- Protosynthesis/Quark Drive fijan la estadística al activarse, distinguen campo de Booster Energy, consumen el objeto cuando corresponde y conservan/eliminan el efecto al cambiar el campo o el Pokémon. Cloud Nine y expiración del campo tienen casos controlados. Se corrigió el redondeo del aumento del 30%.
+- Body Press toma Defensa y sus etapas, pero aplica modificadores ofensivos de Ataque. Se contrastan Iron Defense/boosts, Choice Band, Eviolite, Fur Coat, Unaware y críticos; no se trata como un ataque basado en Ataque normal.
+- Contrato `public_history_v6`: 33 características por movimiento y 83 por Pokémon. El nuevo campo indica si los PP son conocidos o estimados. Los encoders de movimientos históricos de 32 columnas reciben una columna cero en memoria; no se modifica el checkpoint ni se atribuye aprendizaje a esa adaptación.
+
 ## Corregido en la cuarta tanda
 
 - **Encore y Disable:** conservan movimiento afectado y duración, restringen acciones sin destruir PP y expiran. Encore sustituye una selección ya encolada conservando su prioridad; Disable la cancela antes de gastar PP. Se contemplan ausencia de movimiento previo, PP agotados, flags canónicos de exclusión de Encore, cambio, Substitute, Magic Bounce, Aroma Veil y Mental Herb en casos controlados. Encore junto con Disable puede obligar a Struggle.
@@ -36,7 +48,7 @@ Pantallas, Tailwind y Trick Room recorren protocolo → estado → búsqueda →
 
 ## Contrato del modelo
 
-`public_restrictions_v5` conserva 40 campos globales y amplía los datos por Pokémon a 83 valores: 64 históricos, 4 de Substitute/Taunt/ligadura/confusión, 3 presencias de Encore/Disable/Leech Seed y 12 indicadores del movimiento afectado/último movimiento (cuatro posiciones para cada uno). Los campos globales 37–39 identifican quién debe reemplazar y si existe una continuación interna del turno. `load_compatible_state_dict` importa los formatos de 64 y 68 características mediante columnas cero; solo al importar 64 se ponen a cero también las señales de fase. Se aceptan tensores históricos con padding explícito. No se modifican los bytes originales ni se enseña al modelo las nuevas reglas con esta adaptación.
+`public_history_v6` añade el indicador de PP conocidos al encoder de movimientos (32 → 33); conserva 40 campos globales y amplía los datos por Pokémon a 83 valores: 64 históricos, 4 de Substitute/Taunt/ligadura/confusión, 3 presencias de Encore/Disable/Leech Seed y 12 indicadores del movimiento afectado/último movimiento (cuatro posiciones para cada uno). Los campos globales 37–39 identifican quién debe reemplazar y si existe una continuación interna del turno. `load_compatible_state_dict` importa los formatos de 64 y 68 características mediante columnas cero; solo al importar 64 se ponen a cero también las señales de fase. Se aceptan tensores históricos con padding explícito. No se modifican los bytes originales ni se enseña al modelo las nuevas reglas con esta adaptación.
 
 Un futuro entrenamiento necesita un experimento nuevo; no se reanuda una carpeta con un contrato de observación anterior. Los resultados 73/100 y 79/100 pertenecen a la versión congelada `01a6ee1` y no evalúan estas correcciones.
 
@@ -48,8 +60,9 @@ Referencia: paquete fijado **Pokémon Showdown 0.11.11**, Gen 9 custom game, con
 - Segunda batería: 45 secuencias deterministas de volátiles/reemplazos/entrada, 2 familias de confusión (512 cada una) y 2 de Magma Storm (256 cada una).
 - Tercera batería: 77 secuencias deterministas, 12 familias de daño (256 cada una), 6 de cantidad de impactos (512 cada una), Triple Axel por impacto (256) y 5 de precisión por clima (512 cada una).
 - Cuarta batería: 40 secuencias deterministas de restricciones y Leech Seed, más 512 batallas para precisión de Leech Seed. Incluye PP, último movimiento, expiración, casos de KO, prioridad y efecto de Trick Room sobre residuales simultáneos.
-- Total: **15,284 ejecuciones oficiales**. Se comparan HP, estado, PP, boosts, objetos, volátiles, hazards, jugador que debe reemplazar y contador de turno. En los casos aleatorios se comparan soportes/frecuencias con tolerancias explícitas, no resultados idénticos por semilla: los RNG son diferentes.
-- Suite completa: **372 pruebas aprobadas**, incluyendo protocolo→tensores, aislamiento entre lados, compatibilidad de pesos, independencia de ramas y bloqueo de entrenamiento.
+- Quinta batería: 17 secuencias de activación Paradox, 8 familias de daño Paradox (256 cada una), 5 familias de Body Press (256 cada una) y una de críticos (512). Adicionalmente se prueba una secuencia oficial por el adaptador real para historial/Struggle.
+- Total de fixtures controlados: **19,141 ejecuciones oficiales**. Se comparan HP, estado, PP, boosts, objetos, volátiles, hazards, jugador que debe reemplazar y contador de turno. En los casos aleatorios se comparan soportes/frecuencias con tolerancias explícitas, no resultados idénticos por semilla: los RNG son diferentes.
+- Suite completa: **407 pruebas aprobadas**, incluyendo protocolo→tensores, aislamiento entre lados, compatibilidad de pesos, independencia de ramas y bloqueo de entrenamiento.
 
 Además, se completaron 20 partidas locales de integración sin acciones inválidas, fallbacks ni timeouts. Cuatro corresponden a la cuarta tanda, con observaciones de 83 características y pesos congelados. Sus equipos no llevan Encore/Disable/Leech Seed: la validación mecánica proviene de fixtures. Otras cuatro corresponden a la tercera tanda: dos entre equipos de desarrollo y dos de control a profundidad 2. Triple Axel no fue elegido en esas partidas; se valida por impacto en fixtures. En la comparación histórica de la tanda anterior, la evaluación por lotes conservó las decisiones de las dos partidas comparadas y redujo el máximo observado de 26.787 a 15.534 s. Detalle y fuentes: [INTEGRACION.md](INTEGRACION.md).
 
@@ -57,10 +70,6 @@ Estos fixtures controlados no certifican reglas completas de OU ni equivalencia 
 
 ## Pendiente antes de levantar la pausa
 
-1. Ampliar cobertura de fases a callbacks de entrada simultáneos y otros pivotes (Baton Pass, Shed Tail, Parting Shot, Teleport). Las tres familias de pivote usadas por los equipos de desarrollo ya tienen fases explícitas.
-2. Ampliar a otros volátiles y a interacciones con movimientos llamados o transformados; Encore, Disable y Leech Seed ya cuentan con la batería descrita. En observación pública, HP restante de Substitute y temporizadores ocultos son desconocidos: la búsqueda aún usa hipótesis conservadoras, no una distribución de creencias completa. La fuerza de Binding Band oculta también se estima. Las solicitudes que solo ofrecen Struggle aún requieren reconstruir el historial de movimientos/PP para simular su disponibilidad posterior; no debe confundirse esa lista temporal con agotamiento permanente. Una solicitud pública de reemplazo no revela el movimiento enemigo pendiente; el cliente evalúa esa situación sin copiar la cola privada del motor oficial.
-3. Ampliar clima/terreno a setters simultáneos, climas primigenios, activaciones persistentes de Protosynthesis/Quark Drive y otros callbacks de potencia dinámica. Drizzle/Swift Swim y Triple Axel ya están implementados y contrastados en los casos controlados descritos.
-4. Completar callbacks de objetos/habilidades, inmunidades, prioridades y redondeos combinados. La existencia de un helper de entrada no implica que todas las habilidades estén implementadas.
-5. Contrastar trayectorias completas y estados de búsqueda en todos los arquetipos de desarrollo, y evaluar calidad de juego de esta versión.
+Los pendientes que bloquean el primer piloto están enumerados en [CIERRE_PILOTO.md](CIERRE_PILOTO.md) y `docs/ALIGNMENT_STATUS.json`: completar la auditoría del inventario actual, entradas simultáneas y comparación conjunta de trayectorias. Reglas ajenas al inventario quedan diferidas.
 
-La paridad sigue abierta. Ni esta batería ni una prueba de integración levantan automáticamente la pausa del entrenamiento.
+La paridad general sigue abierta. Ninguna batería ni prueba de integración levanta automáticamente la pausa del entrenamiento.

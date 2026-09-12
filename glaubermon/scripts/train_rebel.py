@@ -186,7 +186,7 @@ class AlphaZeroTrainer:
 
     def _data_contract(self):
         contract = dict(rollout_mode=self.rollout_mode, depth=self.depth, max_turns=self.max_turns,
-                        value_target="terminal_only", observation_version="public_restrictions_v5")
+                        value_target="terminal_only", observation_version="public_history_v6")
         root = Path(__file__).resolve().parents[1]
         contract["encoder_sha256"] = hashlib.sha256((root/'models/embeddings.py').read_bytes()).hexdigest()
         if self.rollout_backend == "showdown":

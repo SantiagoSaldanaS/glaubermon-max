@@ -105,7 +105,7 @@ class BattleState:
         locked_m = active.choice_locked_move if is_choice else None
 
         for i, move in enumerate(active.moves):
-            if move.pp > 0 and not move.request_disabled:
+            if move.pp > 0 and not move.request_disabled and not active.move_history_incomplete:
                 if "taunt" in active.volatiles and move.category == MoveCategory.STATUS and move.id != "mefirst":
                     continue
                 if active.volatiles.get("disable",{}).get("move") == move.id:

@@ -23,7 +23,9 @@ def test_short_official_move_list_and_public_turn_are_preserved():
     bot=observer()
     asyncio.run(bot.handle_message('>battle-test\n|turn|47\n|poke|p2|Gholdengo, L100|'))
     state=bot.build_battle_state('battle-test',request())
-    assert [m.id for m in state.p1.active_pokemon.moves] == ['struggle']
+    assert [m.id for m in state.p1.active_pokemon.moves] == request()['side']['pokemon'][0]['moves']
+    assert all(not m.pp_known for m in state.p1.active_pokemon.moves)
+    assert [a.move_id for a in state.get_valid_actions(1)] == ['struggle']
     assert state.turn == 47
     assert state.p1.active_pokemon.item is None
 
