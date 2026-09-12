@@ -54,6 +54,7 @@ def from_snapshot(data):
    if p.get('rawTypes') and p['rawTypes'] != p.get('baseTypes'):
     raw=[PokemonType(t) for t in p['rawTypes']];mons[-1].type_override=(raw[0],raw[1] if len(raw)>1 else None)
    mons[-1].protean_used=p.get('proteanUsed',False)
+   if p.get('fallen') is not None:mons[-1].fallen_allies=p['fallen']
    mons[-1].is_terastallized=bool(p.get('tera'))
    if p.get('teraType'):mons[-1].tera_type=PokemonType(p['teraType'])
    for key in ('protosynthesis','quarkdrive'):

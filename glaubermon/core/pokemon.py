@@ -272,39 +272,28 @@ class Pokemon:
         from glaubermon.core.field_mechanics import best_paradox_stat
         return best_paradox_stat(self)
 
-    def effective_stat(self, stat_name: str, ignore_boosts: bool = False) -> int:
+    def effective_stat(self, stat_name: str, ignore_boosts: bool = False, extra_mods=()) -> int:
         """Compute the current in-battle stat value including stage boosts, items, and abilities."""
         base = self.raw_stats.get(stat_name, 100)
         stage = 0 if ignore_boosts else self.boosts.get(stat_name, 0)
         mult = STAT_STAGE_MULTIPLIERS.get(stage, 1.0)
         stat = int(base * mult)
 
-        # Protosynthesis / Quark Drive booster calculation
         boosted = self.booster_stat or self.get_booster_boosted_stat()
-        if boosted == stat_name:
-            if stat_name == "spe":
-                stat = int(stat * 1.5)
-            else:
-                stat = (stat*5325+2047)//4096
-
         item_clean = clean_key(self.item)
         if stat_name == "spe":
-            if self.status == StatusCondition.PARALYSIS:
-                stat = int(stat * 0.5)
-            if item_clean == "choicescarf":
-                stat = int(stat * 1.5)
-        elif stat_name == "atk":
-            if item_clean == "choiceband":
-                stat = int(stat * 1.5)
-        elif stat_name == "spa":
-            if item_clean == "choicespecs":
-                stat = int(stat * 1.5)
-        elif stat_name == "def":
-            if item_clean == "eviolite":
-                stat = int(stat * 1.5)
-        elif stat_name == "spd":
-            if item_clean in ("assaultvest", "eviolite"):
-                stat = int(stat * 1.5)
+            if boosted == "spe":stat = int(stat*1.5)
+            if self.status == StatusCondition.PARALYSIS:stat //= 2
+            if item_clean == "choicescarf":stat = int(stat*1.5)
+        else:
+            mods=[]
+            if boosted == stat_name:mods.append(5325)
+            if (stat_name,item_clean) in (("atk","choiceband"),("spa","choicespecs"),("def","eviolite"),("spd","assaultvest"),("spd","eviolite")):
+                mods.append(6144)
+            mods.extend(extra_mods)
+            modifier=4096
+            for mod in mods:modifier=(modifier*mod+2048)//4096
+            stat=(stat*modifier+2047)//4096
 
         return max(1, stat)
 

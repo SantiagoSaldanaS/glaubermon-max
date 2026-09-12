@@ -10,12 +10,9 @@ Cuando falta historial, los PP y la fuente de una activación se marcan como des
 
 ## 2. Mecánicas del inventario
 
-Protosynthesis/Quark Drive, Body Press, Protean, Roost, Thunderclap, Water Absorb, Flash Fire y Lum Berry ya tienen contraste directo con Showdown. Permanecen estas revisiones concretas antes del piloto:
+Tienen contraste directo con Showdown: Protosynthesis/Quark Drive, Body Press, Protean, Roost, Thunderclap, Water Absorb, Flash Fire y Lum Berry; teracristalización y reentrada de Ogerpon-Wellspring; cadenas de modificadores de Wellspring Mask, Black Glasses, Supreme Overlord, Vessel of Ruin, Multiscale y Life Orb; combinaciones de Choice Band/Specs y Paradox; orden de cambios simultáneos con Drizzle, Booster Energy y Dauntless Shield.
 
-- Teracristalización de Ogerpon-Wellspring: cambio de habilidad y activaciones de Embody Aspect.
-- Modificadores y redondeos de objetos/habilidades del inventario, incluidos Wellspring Mask, Supreme Overlord, Vessel of Ruin y Multiscale.
-- Orden de cambios y callbacks de entrada simultáneos.
-- Vincular las demás entradas del inventario con evidencia de regresión o pruebas diferenciales, sin marcar una regla como cubierta solo porque aparece su nombre en el código.
+Pendiente: cerrar la revisión explícita de todas las entradas del inventario, vinculando cada una con evidencia de regresión o pruebas diferenciales. La aparición de un nombre en el código no basta para certificar la regla ni todas sus interacciones.
 
 ## 3. Comprobación conjunta y salida
 

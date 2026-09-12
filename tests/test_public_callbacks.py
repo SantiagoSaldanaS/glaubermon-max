@@ -55,3 +55,14 @@ def test_v6_checkpoint_and_inputs_zero_extend_callbacks_only():
   old=model(moves,stats,moves,stats,field)
   new=model(moves,padded,moves,padded,field)
  assert all(torch.equal(a,b) for a,b in zip(old,new))
+
+
+def test_wellspring_public_tera_counts_only_authoritative_boost():
+ b=bot();room='battle-wellspring'
+ asyncio.run(b.handle_message('>'+room+'\n|player|p1|GlaubermonAI|\n|poke|p2|Ogerpon-Wellspring|\n|switch|p2a: Ogerpon|Ogerpon-Wellspring|100/100\n|-terastallize|p2a: Ogerpon|Water\n|-boost|p2a: Ogerpon|spd|1|[from] ability: Embody Aspect'))
+ m=b.build_battle_state(room,request()).p2.active_pokemon
+ assert m.boosts['spd']==1 and m.ability=='embodyaspectwellspring'
+ assert m.is_terastallized and m.active_types==(PokemonType.WATER,None)
+ asyncio.run(b.handle_message('>'+room+'\n|switch|p2a: Ogerpon|Ogerpon-Wellspring-Tera|100/100\n|-boost|p2a: Ogerpon|spd|1|[from] ability: Embody Aspect'))
+ m=b.build_battle_state(room,request()).p2.active_pokemon
+ assert m.boosts['spd']==1 and m.ability=='embodyaspectwellspring'

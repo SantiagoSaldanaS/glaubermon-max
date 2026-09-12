@@ -1,7 +1,7 @@
 // Official, isolated mechanics fixtures. Gen 9 custom game permits controlled sets.
 const {Battle}=require(process.argv[2]);
 const input=JSON.parse(require('fs').readFileSync(0,'utf8'));
-function mon(p) {return {species:p.species.name,level:p.level,types:p.getTypes(),baseTypes:[...p.baseSpecies.types],rawTypes:[...p.types],proteanUsed:!!p.abilityState.protean,tera:p.terastallized,teraType:p.teraType,hp:p.hp,maxhp:p.maxhp,stats:{...p.storedStats},
+function mon(p) {return {species:p.species.name.replace(/-Tera$/, ''),level:p.level,types:p.getTypes(),baseTypes:[...p.baseSpecies.types],rawTypes:[...p.types],proteanUsed:!!p.abilityState.protean,fallen:p.abilityState.fallen,tera:p.terastallized,teraType:p.teraType,hp:p.hp,maxhp:p.maxhp,stats:{...p.storedStats},
  lastMove:p.lastMove?.id||null,shieldBoost:!!p.shieldBoost,swordBoost:!!p.swordBoost,ability:p.ability,item:p.item,status:p.status,time:p.statusState.time||0,boosts:{...p.boosts},
  volatiles:Object.fromEntries(['substitute','taunt','confusion','partiallytrapped','trapped','encore','disable','leechseed','protosynthesis','quarkdrive','flashfire','roost'].filter(k=>p.volatiles[k]).map(k=>{
  const v=p.volatiles[k];return [k,{...(v.bestStat?{best_stat:v.bestStat,from_booster:!!v.fromBooster}:{}),...(v.move?{move:v.move}:{}),...(k==='leechseed'?{source_side:Number(v.sourceSlot[1])}:{}),...(v.hp!==undefined?{hp:v.hp}:{}),...(v.duration!==undefined?{duration:v.duration}:{}),
@@ -22,6 +22,7 @@ for (const fixture of input) {
  b.makeChoices('team 123456'.slice(0,5+team[0].length),'team 123456'.slice(0,5+team[1].length));
  for(let i=0;i<2;i++) {
   const p=b.sides[i].active[0], c=fixture.initial?.[i]||{};
+  if(c.fallen!==undefined){p.abilityState.fallen=c.fallen;p.side.totalFainted=c.fallen;}
   if(c.last_move)p.lastMove=b.dex.getActiveMove(c.last_move);
   if(c.hp!==undefined)p.hp=c.hp;
   if(c.status){p.setStatus(c.status);if(c.time!==undefined)p.statusState.time=c.time;}

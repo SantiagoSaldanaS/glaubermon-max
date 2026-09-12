@@ -186,6 +186,9 @@ def calculate_damage_rolls(
         ignore_atk_boosts |= attacker.boosts.get(attack_stat, 0) < 0
         ignore_def_boosts |= defender.boosts.get(defense_stat, 0) > 0
 
+    offense_mods=[]
+    if atk_ability == "flashfire" and "flashfire" in attacker.volatiles and move_type == PokemonType.FIRE:offense_mods.append(6144)
+    if move.category == MoveCategory.SPECIAL and def_ability == "vesselofruin" and atk_ability != "vesselofruin":offense_mods.append(3072)
     if move.category == MoveCategory.PHYSICAL:
         offense = attacker
         if m_id == "bodypress":
@@ -195,7 +198,7 @@ def calculate_damage_rolls(
             offense.booster_stat = attacker.booster_stat or attacker.get_booster_boosted_stat()
             offense.raw_stats["atk"] = attacker.raw_stats["def"]
             offense.boosts["atk"] = attacker.boosts.get("def",0)
-        atk = offense.effective_stat("atk", ignore_boosts=ignore_atk_boosts)
+        atk = offense.effective_stat("atk", ignore_boosts=ignore_atk_boosts,extra_mods=offense_mods)
         defense = defender.effective_stat("def", ignore_boosts=ignore_def_boosts)
         if atk_ability in ("hugepower", "purepower"):
             atk = int(atk * 2.0)
@@ -210,11 +213,8 @@ def calculate_damage_rolls(
         if (atk_ability == "swordofruin" or def_ability == "swordofruin") and def_ability != "swordofruin":
             defense = int(defense * 0.75)
     else:
-        atk = attacker.effective_stat("spa", ignore_boosts=ignore_atk_boosts)
+        atk = attacker.effective_stat("spa", ignore_boosts=ignore_atk_boosts,extra_mods=offense_mods)
         defense = defender.effective_stat("spd", ignore_boosts=ignore_def_boosts)
-        # Vessel of Ruin: Ting-Lu lowers Special Attack of all other Pokémon by 25%
-        if def_ability == "vesselofruin" and atk_ability != "vesselofruin":
-            atk = int(atk * 0.75)
         # Beads of Ruin: Chi-Yu lowers Special Defense of all other Pokémon by 25%
         if (atk_ability == "beadsofruin" or def_ability == "beadsofruin") and def_ability != "beadsofruin":
             defense = int(defense * 0.75)
@@ -226,15 +226,18 @@ def calculate_damage_rolls(
     if move.category == MoveCategory.SPECIAL and atk_ability == "solarpower" and weather in (Weather.SUN,Weather.HARSH_SUN):
         atk = poke_round(atk*6144)
 
-    if atk_ability == "flashfire" and "flashfire" in attacker.volatiles and move_type == PokemonType.FIRE:
-        atk = poke_round(atk*6144)
-
     crit_mult = 2.25 if (is_critical and atk_ability == "sniper") else (1.5 if is_critical else 1.0)
 
     effective_bp = move.base_power
     if m_id == "weatherball" and weather not in (Weather.NONE,Weather.STRONG_WINDS):effective_bp *= 2
     if m_id == "terrainpulse" and terrain != Terrain.NONE and attacker.is_grounded():effective_bp *= 2
     bp_mods=[]
+    if atk_ability == "supremeoverlord":
+        count=getattr(attacker,"fallen_allies",None)
+        if count is None:count=attacker_side.fainted_count if attacker_side is not None else fallen_allies
+        bp_mods.append((4096,4506,4915,5325,5734,6144)[min(5,max(0,count))])
+    if TYPE_BOOSTING_ITEMS.get(atk_item)==move_type:bp_mods.append(4915)
+    if atk_item == "wellspringmask" and clean_key(attacker.species).startswith("ogerponwellspring"):bp_mods.append(4915)
     if atk_ability == "technician" and 0 < effective_bp <= 60:bp_mods.append(6144)
     if m_id == "knockoff" and is_removable_item(defender.item):bp_mods.append(6144)
     if attacker.is_grounded() and {Terrain.GRASSY:PokemonType.GRASS,Terrain.ELECTRIC:PokemonType.ELECTRIC,Terrain.PSYCHIC:PokemonType.PSYCHIC}.get(terrain)==move_type:
@@ -299,15 +302,6 @@ def calculate_damage_rolls(
     # 11. Ability Damage Multipliers
     ability_mult = 1.0
 
-    # Supreme Overlord: Kingambit +10% per fainted ally (up to 5 fallen = +50%)
-    if atk_ability == "supremeoverlord":
-        f_count = fallen_allies
-        if attacker_side is not None and hasattr(attacker_side, "fainted_count"):
-            f_count = attacker_side.fainted_count
-        elif hasattr(attacker, "fallen_allies"):
-            f_count = attacker.fallen_allies
-        ability_mult *= (1.0 + 0.10 * min(5, max(0, f_count)))
-
     # Sharpness: +50% to slicing moves
     if atk_ability == "sharpness" and (getattr(move, "is_slicing", False) or m_id in SLICING_MOVES):
         ability_mult *= 1.5
@@ -362,20 +356,12 @@ def calculate_damage_rolls(
     if atk_item:
         if "lifeorb" in atk_item:
             item_mult *= 1.3
-        elif "wellspringmask" in atk_item and move_type == PokemonType.WATER:
-            item_mult *= 1.2
         elif "hearthflamemask" in atk_item and move_type == PokemonType.FIRE:
             item_mult *= 1.2
         elif "cornerstonemask" in atk_item and move_type == PokemonType.ROCK:
             item_mult *= 1.2
         elif "expertbelt" in atk_item and type_mult > 1.0:
             item_mult *= 1.2
-        else:
-            for it_key, b_type in TYPE_BOOSTING_ITEMS.items():
-                if it_key in atk_item and move_type == b_type:
-                    item_mult *= 1.2
-                    break
-
     # Intermediate calculation before discrete rolls
     mod_damage = base_damage
     mod_damage = int(mod_damage * weather_mult)
@@ -393,10 +379,11 @@ def calculate_damage_rolls(
         final_dmg = int(final_dmg * stab_mult)
         final_dmg = int(final_dmg * type_mult)
         final_dmg = int(final_dmg * burn_mult)
-        final_dmg = int(final_dmg * ability_mult)
-        final_dmg = int(final_dmg * item_mult)
-        if screen:
-            final_dmg //= 2
+        final_mod=4096
+        # Screen, defensive ability and item modifiers share one fixed-point chain.
+        for mod in ([2048] if screen else []) + [round(ability_mult*4096),5324 if atk_item=="lifeorb" else round(item_mult*4096)]:
+            final_mod=(final_mod*mod+2048)//4096
+        final_dmg = poke_round(final_dmg*final_mod)
         rolls.append(max(1, final_dmg))
 
     return rolls

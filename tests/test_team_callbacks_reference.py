@@ -36,6 +36,17 @@ CASES += [
  dict(name='lum_not_consumed_on_ko',teams=[[team('Mew',moves=['Nuzzle'])],[team(item='Lum Berry')]],initial=[{}, {'hp':1}]),
 ]
 
+for faster,trick in [(1,False),(2,False),(1,True),(2,True)]:
+ CASES.append(dict(name=f'double_drizzle_queue_speed_{faster}_{trick}',trick_room=trick,
+  teams=[[team('Mew'),team('Pelipper',ability='Drizzle',item='Damp Rock')],[team(),team('Pelipper',ability='Drizzle')]],
+  initial=[{'stats':{'spe':300 if faster==1 else 100}},{'stats':{'spe':300 if faster==2 else 100}}],actions=[['switch 2','switch 2']]))
+for a,b in [('Drizzle','Protosynthesis'),('Dauntless Shield','Quark Drive')]:
+ for reversed_sides in (False,True):
+  sets=[[team('Mew'),team('Pelipper' if a=='Drizzle' else 'Zamazenta',ability=a,item='Damp Rock' if a=='Drizzle' else 'Leftovers')],
+        [team(),team('Great Tusk' if b=='Protosynthesis' else 'Iron Valiant',ability=b,item='Booster Energy')]]
+  if reversed_sides:sets.reverse()
+  CASES.append(dict(name=f'double_entry_{a}_{b}_{reversed_sides}',teams=sets,actions=[['switch 2','switch 2']]))
+
 TYPE_CASES = [
  dict(name='protean_changes_before_protect',teams=[[team('Meowscarada',ability='Protean',moves=['Triple Axel'])],[team(moves=['Protect'])]]),
  dict(name='protean_once_per_entry',teams=[[team('Meowscarada',ability='Protean',moves=['Splash','Swords Dance','Agility'])],[team()]],actions=[['move 1','move 1'],['move 2','move 1'],['move 3','move 1']]),
@@ -50,6 +61,8 @@ TYPE_CASES = [
  dict(name='roost_flying_tera_stays_immune',teams=[[team('Corviknight',moves=['Roost'],teraType='Flying')],[team(moves=['Earthquake'])]],initial=[{'hp':100},{}],actions=[['move 1 terastallize','move 1']]),
  dict(name='roost_preserves_type_across_pivot_phase',teams=[[team('Corviknight',moves=['Roost'],evs={'spe':252})],[team(moves=['U-turn']),team('Blissey')]],initial=[{'hp':100},{'stats':{'atk':1}}],actions=[['move 1','move 1'],['','switch 2']]),
  dict(name='protean_struggle_does_not_change_type',teams=[[team('Meowscarada',ability='Protean',moves=['Tackle'])],[team()]],initial=[{'pp':[0]}, {'hp':1}]),
+ dict(name='wellspring_tera_removes_water_absorb',teams=[[team('Ogerpon-Wellspring',item='Wellspring Mask',ability='Water Absorb',moves=['Splash'],teraType='Water')],[team(moves=['Surf'])]],initial=[{'hp':100},{'stats':{'spa':1}}],actions=[['move 1 terastallize','move 1']],compare_ability=True),
+ dict(name='wellspring_tera_reentry_boost',teams=[[team('Ogerpon-Wellspring',item='Wellspring Mask',ability='Water Absorb',moves=['Splash'],teraType='Water'),team('Blissey')],[team()]],actions=[['move 1 terastallize','move 1'],['switch 2','move 1'],['switch 2','move 1']],compare_ability=True),
 ]
 for c in TYPE_CASES:c['compare_types']=True
 CASES.extend(TYPE_CASES)

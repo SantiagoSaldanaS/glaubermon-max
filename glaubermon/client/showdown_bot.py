@@ -528,22 +528,10 @@ class ShowdownBot:
                     self.our_tera_used[room] = True
                     logger.info(f"[{room}] Our {spec} Terastallized to: {tera_type}")
 
-                # Embody Aspect immediately grants a stat boost upon Terastallization
-                spec_clean = clean_key(spec)
-                if "ogerpon" in spec_clean:
-                    boost_dict = self.our_boosts if (self.our_side.get(room) == side_tag) else self.opp_boosts
-                    if room not in boost_dict:
-                        boost_dict[room] = {}
-                    if spec not in boost_dict[room]:
-                        boost_dict[room][spec] = {}
-                    if "hearthflame" in spec_clean:
-                        boost_dict[room][spec]["atk"] = min(6, boost_dict[room][spec].get("atk", 0) + 1)
-                    elif "cornerstone" in spec_clean:
-                        boost_dict[room][spec]["def"] = min(6, boost_dict[room][spec].get("def", 0) + 1)
-                    elif "wellspring" in spec_clean:
-                        boost_dict[room][spec]["spd"] = min(6, boost_dict[room][spec].get("spd", 0) + 1)
-                    else:
-                        boost_dict[room][spec]["spe"] = min(6, boost_dict[room][spec].get("spe", 0) + 1)
+                # Stat boosts arrive as authoritative -boost events.
+                if "ogerpon" in clean_key(spec):
+                    form=next((f for f in ("wellspring","hearthflame","cornerstone") if f in clean_key(spec)),"teal")
+                    self.revealed_abilities.setdefault(room,{})[(side_tag,spec)]="embodyaspect"+form
 
             elif room and command == "poke" and len(parts) > 3:
                 side_tag = parts[2].strip()
@@ -1098,6 +1086,9 @@ class ShowdownBot:
 
             # Resolve Opponent Ability
             ded_ability = self.revealed_abilities.get(room,{}).get(("p2" if self.our_side.get(room,"p1")=="p1" else "p1",spec))
+            if ded_ability == "embodyaspect" and "ogerpon" in clean_key(spec):
+                form=next((f for f in ("wellspring","hearthflame","cornerstone") if f in clean_key(spec)),"teal")
+                ded_ability += form
             if ded_ability:
                 ability = ded_ability
             elif meta_mon and meta_mon.ability:

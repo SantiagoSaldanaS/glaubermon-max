@@ -101,6 +101,7 @@ def test_volatile_and_phase_trajectory(case,references):
     assert ours.current_hp==m['hp'], (case['name'],choices,ours.species,ours.current_hp,m['hp'])
     if m['hp'] > 0: assert ours.status==STATUS[m['status']]
     if case.get('compare_last_move') and m['hp']>0:assert ours.last_move==m['lastMove']
+    if case.get('compare_ability'):assert (ours.ability or '').lower().replace(' ','').replace('-','')==m['ability']
     if case.get('compare_types'):
      assert [t.value for t in ours.active_types if t is not None]==m['types'], (case['name'],ours.species,ours.active_types,m['types'])
      assert ours.protean_used==m['proteanUsed']

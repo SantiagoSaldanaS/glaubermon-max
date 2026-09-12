@@ -4,9 +4,8 @@
   "feature_schema": "public_callbacks_v7",
   "official_reference": "pokemon-showdown@0.11.11",
   "remaining": [
-    "Audit current-team damage modifiers/rounding and Ogerpon Wellspring Terastallization callbacks",
-    "Validate simultaneous entry effects for the pinned current-team pool",
-    "Compare full official trajectories and legal action/state transitions across the pinned team pool"
+    "Complete explicit coverage review for every move, ability and item in the pinned pilot pool",
+    "Compare full official trajectories and legal action/state transitions across all five pinned teams; convert deterministic discrepancies into regressions"
   ],
   "pilot_scope": "docs/alignment/pilot-scope.json",
   "deferred_outside_pilot_scope": [

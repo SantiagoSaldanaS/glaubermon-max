@@ -6,6 +6,14 @@ Instrucción de Felipe/Santiago: corregir las diferencias de entorno antes de re
 
 El cierre se limita a los equipos actuales: [criterios y pendientes concretos](CIERRE_PILOTO.md). El inventario fijado incluye 57 movimientos, 16 habilidades y 13 objetos. Las mecánicas ajenas a esos sets ya no bloquean por sí mismas este primer piloto.
 
+## Séptima tanda: modificadores, Ogerpon y entradas simultáneas
+
+- Wellspring Mask y Black Glasses modifican potencia base; la máscara aumenta también Horn Leech y Play Rough. Supreme Overlord usa el modificador fijo de potencia correspondiente a 0–5 aliados caídos, junto con Black Glasses.
+- Choice Band/Specs, Paradox, Flash Fire y Vessel of Ruin combinan modificadores antes de redondear la estadística. Pantallas, Multiscale y Life Orb comparten la cadena de modificación final, incluido el valor fijo 5324/4096 de Life Orb.
+- Ogerpon-Wellspring pierde Water Absorb al adquirir Embody Aspect, aumenta Defensa Especial una vez y vuelve a recibir ese aumento al reingresar. El cliente cuenta solo el evento público de aumento; el nombre público abreviado de la habilidad conserva su variante correcta.
+- Dos cambios voluntarios usan la velocidad de los Pokémon salientes (incluido Trick Room) para ordenar callbacks. Se contrastan Drizzle/Damp Rock, entrada con Paradox/Booster Energy y Dauntless Shield en ambos lados.
+- Evidencia añadida: 22 familias de daño con 256 batallas cada una y 10 secuencias de Tera/entrada; **25,847 ejecuciones oficiales controladas** acumuladas. Suite completa: **487 pruebas aprobadas**. Continúa `public_callbacks_v7` y la pausa de entrenamiento. Falta la revisión conjunta de cobertura/trayectorias de los cinco equipos.
+
 ## Sexta tanda: callbacks de los equipos actuales
 
 - Thunderclap/Sucker Punch verifican que el rival tenga un ataque pendiente; fallan frente a estado, cambio y después de actuar. Water Absorb cura antes de precisión/Substitute y detiene Flip Turn. Flash Fire absorbe también estado, conserva el aumento ofensivo y se limpia al cambiar.

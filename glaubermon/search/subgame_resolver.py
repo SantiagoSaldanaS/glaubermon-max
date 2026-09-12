@@ -69,6 +69,9 @@ def apply_entry_abilities(state,side_idx):
     if not mon or mon.is_fainted:
         return
     ability = clean_key(mon.ability)
+    if ability.startswith("embodyaspect") and mon.is_terastallized:
+        stat={"embodyaspectwellspring":"spd","embodyaspecthearthflame":"atk","embodyaspectcornerstone":"def"}.get(ability,"spe")
+        mon.boosts[stat] = min(6,mon.boosts.get(stat,0)+1)
     if ability in WEATHER_ABILITIES:set_weather(state,WEATHER_ABILITIES[ability],mon)
     if ability in TERRAIN_ABILITIES:set_terrain(state,TERRAIN_ABILITIES[ability],mon)
     sync_paradox(state)
@@ -100,12 +103,16 @@ def apply_tera_boosts(mon: Optional[Pokemon]):
     item_clean = clean_key(mon.item)
     if "ogerpon" in spec_clean:
         if "hearthflame" in spec_clean or "hearthflame" in item_clean:
+            mon.ability = "embodyaspecthearthflame"
             mon.boosts["atk"] = min(6, mon.boosts.get("atk", 0) + 1)
         elif "cornerstone" in spec_clean or "cornerstone" in item_clean:
+            mon.ability = "embodyaspectcornerstone"
             mon.boosts["def"] = min(6, mon.boosts.get("def", 0) + 1)
         elif "wellspring" in spec_clean or "wellspring" in item_clean:
+            mon.ability = "embodyaspectwellspring"
             mon.boosts["spd"] = min(6, mon.boosts.get("spd", 0) + 1)
         else:
+            mon.ability = "embodyaspectteal"
             # Teal Mask (standard) grants +1 Speed
             mon.boosts["spe"] = min(6, mon.boosts.get("spe", 0) + 1)
 
@@ -186,7 +193,13 @@ def simulate_turn_transition(
             elif action is not None:
                 raise ValueError("The other player must wait during replacement")
     p1_switched = p2_switched = False
-    for side_idx, action in ((1, a1), (2, a2)):
+    switch_actions = [(i,a) for i,a in ((1,a1),(2,a2)) if a is not None and a.action_type == ActionType.SWITCH]
+    # Queue speed belongs to the outgoing Pokemon, before either entry callback.
+    switch_actions.sort(key=lambda pair:speed_order_key((s.p1 if pair[0]==1 else s.p2).active_pokemon,s.p1 if pair[0]==1 else s.p2,s),reverse=True)
+    if len(switch_actions)==2 and sample_outcomes:
+        first,second=(s.p1 if switch_actions[0][0]==1 else s.p2),(s.p1 if switch_actions[1][0]==1 else s.p2)
+        if speed_order_key(first.active_pokemon,first,s)==speed_order_key(second.active_pokemon,second,s) and rng.random()<.5:switch_actions.reverse()
+    for side_idx, action in switch_actions:
         if action is not None and action.action_type == ActionType.SWITCH:
             if not resuming and s.is_trapped(side_idx):
                 raise ValueError("A trapped Pokémon cannot switch voluntarily")

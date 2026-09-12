@@ -43,7 +43,7 @@ class PublicVolatileTracker:
             return
         command,ident = parts[1:3]
         if command in ('switch','drag') and len(parts) > 3:
-            key = (ident[:2],clean_key(parts[3].split(',')[0]))
+            key = (ident[:2],clean_key(parts[3].split(',')[0].removesuffix('-Tera')))
             previous = self.active.get(key[0])
             for mon_key in (previous,key):
                 if mon_key:
