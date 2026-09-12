@@ -1,6 +1,15 @@
 # Alineación con Showdown: abierta; reentrenamiento pausado
 
-Instrucción de Felipe/Santiago: corregir las diferencias de entorno antes de reentrenar. `AlphaZeroTrainer.train()` rechaza corridas mientras `docs/ALIGNMENT_STATUS.json` no permita entrenar. No se inició reentrenamiento en estas dos tandas; las pruebas de optimizador usan modelos desechables. Los checkpoints originales se conservan.
+Instrucción de Felipe/Santiago: corregir las diferencias de entorno antes de reentrenar. `AlphaZeroTrainer.train()` rechaza corridas mientras `docs/ALIGNMENT_STATUS.json` no permita entrenar. No se inició reentrenamiento en estas tandas; las pruebas de optimizador usan modelos desechables. Los checkpoints originales se conservan.
+
+## Corregido en la tercera tanda
+
+- **Clima y terreno:** Rain Dance/Sunny Day/Sandstorm/Snowscape y los cuatro terrenos, setters de entrada (incluido Drizzle), duración de rocas/Terrain Extender, expiración, Cloud Nine/Air Lock, residuales y recuperación dependiente del clima. Grassy Terrain recupera HP al terminar el turno; Psychic Terrain bloquea prioridad dirigida a objetivos en tierra; Misty/Electric conservan sus restricciones de estado/Rest. Ice Spinner elimina también el contador del terreno.
+- **Velocidad:** Swift Swim, Chlorophyll, Sand Rush, Slush Rush, Surge Surfer y Quick Feet se combinan con etapas, objetos, Tailwind, parálisis y Trick Room. Prankster/Gale Wings aportan prioridad; se contempla la inmunidad Dark a estado con Prankster.
+- **Daño y precisión:** bonificaciones de terreno, reducción de Earthquake en Grassy y Dragon en Misty, defensas de Rock con arena/Ice con nieve, Weather Ball/Terrain Pulse y precisión de Hurricane/Thunder/Blizzard según el clima. La prueba diferencia daño directo, críticos y residuales.
+- **Golpes múltiples:** carga de metadatos canónicos, cantidad de impactos y precisión por golpe, Skill Link/Loaded Dice, potencia 20/40/60 de Triple Axel y 10/20/30 de Triple Kick. Cada impacto actualiza HP, Substitute, contacto y efectos secundarios; el ataque se detiene por fallo o KO y Life Orb cobra una vez. En búsqueda determinista se usa una cantidad representativa de golpes; las transiciones muestreadas sí sortean la distribución.
+
+Estas correcciones no certifican todos los callbacks ni redondeos combinados. Sigue pendiente representar como creencias los temporizadores ocultos y las activaciones ambientales persistentes de Protosynthesis/Quark Drive. El contrato de tensores continúa en `public_volatile_v4`.
 
 ## Corregido en la segunda tanda
 
@@ -30,8 +39,9 @@ Referencia: paquete fijado **Pokémon Showdown 0.11.11**, Gen 9 custom game, con
 
 - Primera batería: 18 secuencias deterministas, 5 familias de daño con pantallas (256 batallas cada una), parálisis/congelación (512 cada una) y 7 familias de efectos secundarios (256 cada una).
 - Segunda batería: 45 secuencias deterministas de volátiles/reemplazos/entrada, 2 familias de confusión (512 cada una) y 2 de Magma Storm (256 cada una).
-- Total: **5,695 ejecuciones oficiales**. Se comparan HP, estado, PP, boosts, objetos, volátiles, hazards, jugador que debe reemplazar y contador de turno. En los casos aleatorios se comparan soportes/frecuencias con tolerancias explícitas, no resultados idénticos por semilla: los RNG son diferentes.
-- Suite completa: **227 pruebas aprobadas**, incluyendo protocolo→tensores, aislamiento entre lados, compatibilidad de pesos, independencia de ramas y bloqueo de entrenamiento.
+- Tercera batería: 77 secuencias deterministas, 12 familias de daño (256 cada una), 6 de cantidad de impactos (512 cada una), Triple Axel por impacto (256) y 5 de precisión por clima (512 cada una).
+- Total: **14,732 ejecuciones oficiales**. Se comparan HP, estado, PP, boosts, objetos, volátiles, hazards, jugador que debe reemplazar y contador de turno. En los casos aleatorios se comparan soportes/frecuencias con tolerancias explícitas, no resultados idénticos por semilla: los RNG son diferentes.
+- Suite completa: **328 pruebas aprobadas**, incluyendo protocolo→tensores, aislamiento entre lados, compatibilidad de pesos, independencia de ramas y bloqueo de entrenamiento.
 
 Además, se completaron 12 partidas locales de integración sin acciones inválidas, fallbacks ni timeouts. La evaluación por lotes conservó las decisiones de las dos partidas comparadas y redujo el máximo observado de 26.787 a 15.534 s. Detalle y fuentes: [INTEGRACION.md](INTEGRACION.md).
 
@@ -41,7 +51,7 @@ Estos fixtures controlados no certifican reglas completas de OU ni equivalencia 
 
 1. Ampliar cobertura de fases a callbacks de entrada simultáneos y otros pivotes (Baton Pass, Shed Tail, Parting Shot, Teleport). Las tres familias de pivote usadas por los equipos de desarrollo ya tienen fases explícitas.
 2. Completar otros volátiles relevantes (Encore, Disable, Leech Seed). En observación pública, HP restante de Substitute y temporizadores ocultos son desconocidos: la búsqueda aún usa hipótesis conservadoras, no una distribución de creencias completa. La fuerza de Binding Band oculta también se estima. Una solicitud pública de reemplazo no revela el movimiento enemigo pendiente; el cliente evalúa esa situación sin copiar la cola privada del motor oficial.
-3. Validar setters y residuales de clima/terreno, habilidades de velocidad, golpes múltiples y potencia dinámica. Drizzle/Swift Swim y Triple Axel aparecen en los equipos actuales; siguen siendo pendientes materiales.
+3. Ampliar clima/terreno a setters simultáneos, climas primigenios, activaciones persistentes de Protosynthesis/Quark Drive y otros callbacks de potencia dinámica. Drizzle/Swift Swim y Triple Axel ya están implementados y contrastados en los casos controlados descritos.
 4. Completar callbacks de objetos/habilidades, inmunidades, prioridades y redondeos combinados. La existencia de un helper de entrada no implica que todas las habilidades estén implementadas.
 5. Contrastar trayectorias completas y estados de búsqueda en todos los arquetipos de desarrollo, y evaluar calidad de juego de esta versión.
 

@@ -6,7 +6,7 @@
   "remaining": [
     "Extend oracle coverage to simultaneous entry callbacks and remaining pivot moves (Baton Pass, Shed Tail, Parting Shot, Teleport)",
     "Model remaining relevant volatiles (Encore, Disable, Leech Seed) and uncertain public timers as beliefs",
-    "Validate weather/terrain residuals and entry setters, speed abilities, multi-hit and dynamic-power moves",
+    "Extend weather/terrain coverage to simultaneous setters, primal weather, persistent Protosynthesis/Quark Drive activation state and remaining dynamic-power callbacks",
     "Audit remaining item/ability callbacks and modifier rounding",
     "Compare full official trajectories and search-state transitions across current team pools"
   ]

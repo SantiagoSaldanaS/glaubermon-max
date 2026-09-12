@@ -11,11 +11,14 @@ from glaubermon.core.constants import get_type_effectiveness, clean_key
 from glaubermon.inference.damage_calc import calculate_damage_rolls, is_contact_move, is_removable_item
 from glaubermon.search.evaluators import StateEvaluator, HeuristicEvaluator
 from glaubermon.search.matrix_solver import solve_zero_sum_game
+from glaubermon.core.field_mechanics import (effective_weather,effective_speed,move_priority,accuracy_chance,
+    set_weather,set_terrain,weather_residual,hit_count,WEATHER_MOVES,WEATHER_ABILITIES,TERRAIN_MOVES,TERRAIN_ABILITIES)
 
 
 def speed_order_key(mon, side, state):
     """Comparable speed within one priority bracket, including public field effects."""
-    speed = mon.effective_stat("spe") * (2 if side.tailwind else 1)
+    weather = effective_weather(state.weather,state.p1.active_pokemon,state.p2.active_pokemon)
+    speed = effective_speed(mon,side,weather,state.terrain)
     return -speed if state.trick_room else speed
 
 
@@ -64,6 +67,8 @@ def apply_entry_abilities(state,side_idx):
     if not mon or mon.is_fainted:
         return
     ability = clean_key(mon.ability)
+    if ability in WEATHER_ABILITIES:set_weather(state,WEATHER_ABILITIES[ability],mon)
+    if ability in TERRAIN_ABILITIES:set_terrain(state,TERRAIN_ABILITIES[ability],mon)
     if ability in ("dauntlessshield","intrepidsword"):
         flag = "shield_boosted" if ability == "dauntlessshield" else "sword_boosted"
         if not getattr(mon,flag,False):
@@ -215,8 +220,8 @@ def simulate_turn_transition(
 
     # Determine move order (Priority first, then Effective Speed)
     if m1 and m2:
-        prio1 = m1.priority
-        prio2 = m2.priority
+        prio1 = move_priority(p1_active,m1)
+        prio2 = move_priority(p2_active,m2)
         spe1 = speed_order_key(p1_active, s.p1, s)
         spe2 = speed_order_key(p2_active, s.p2, s)
 
@@ -374,13 +379,16 @@ def simulate_turn_transition(
                 moved_players.add(player)
                 continue
 
-            if sample_outcomes and targets_foe and not move.always_hits:
-                stage = max(-6, min(6, attacker.boosts.get("accuracy", 0) - defender.boosts.get("evasion", 0)))
-                modifier = (3 + stage) / 3 if stage >= 0 else 3 / (3 - stage)
-                chance = min(1.0, max(0.0, int(move.accuracy * 100 * modifier) / 100))
-                if clean_key(attacker.ability) != "noguard" and clean_key(defender.ability) != "noguard" and rng.random() >= chance:
-                    moved_players.add(player)
-                    continue
+            battle_weather = effective_weather(s.weather,attacker,defender)
+            if targets_foe and move.category==MoveCategory.STATUS and clean_key(attacker.ability)=="prankster" and PokemonType.DARK in defender.active_types:
+                moved_players.add(player)
+                continue
+            if targets_foe and s.terrain==Terrain.PSYCHIC and defender.is_grounded() and move_priority(attacker,move)>0:
+                moved_players.add(player)
+                continue
+            if sample_outcomes and targets_foe and rng.random() >= accuracy_chance(attacker,defender,move,battle_weather):
+                moved_players.add(player)
+                continue
 
             if move.category == MoveCategory.STATUS and targets_foe and clean_key(defender.ability) == "goodasgold":
                 moved_players.add(player)
@@ -394,80 +402,129 @@ def simulate_turn_transition(
             actual_dmg = 0
             # 2. Damage calculation
             if move.category in (MoveCategory.PHYSICAL, MoveCategory.SPECIAL):
-                atk_side = s.p1 if player == "p1" else s.p2
-                critical = False
-                if sample_outcomes and move.base_power > 0:
-                    ratio = move.crit_ratio + int(clean_key(attacker.ability) == "superluck")
-                    ratio += int(clean_key(attacker.item) in ("scopelens", "razorclaw"))
-                    denominator = (24, 8, 2, 1)[max(0, min(3, ratio - 1))]
-                    critical = move.will_crit or rng.randrange(denominator) == 0
-                    if clean_key(defender.ability) in ("battlearmor", "shellarmor"):
-                        critical = False
-                rolls = calculate_damage_rolls(
-                    attacker, defender, move, s.weather, s.terrain,
-                    attacker_side=atk_side, is_critical=critical,
-                    defender_side=s.p2 if player == "p1" else s.p1,
-                )
-                median_dmg = rng.choice(rolls) if sample_outcomes else rolls[len(rolls) // 2]
-                # Sampled blocks returned above; moves that bypass Protect reach here.
-                succ_rate = 0.0 if sample_outcomes else getattr(defender, "protect_success_rate", 0.0)
-                is_contact = getattr(move, "is_contact", False) or is_contact_move(m_id, move.category)
+                total_damage = 0
+                for hit in range(1,hit_count(attacker,move,rng,sample_outcomes)+1):
+                    if attacker.is_fainted or defender.is_fainted:break
+                    if hit > 1 and move.multiaccuracy and clean_key(attacker.ability) != "skilllink" and clean_key(attacker.item) != "loadeddice":
+                        if sample_outcomes and rng.random() >= accuracy_chance(attacker,defender,move,battle_weather):break
+                    hits_substitute = ("substitute" in defender.volatiles and targets_foe
+                                       and not move.bypass_substitute and not move.is_sound
+                                       and clean_key(attacker.ability) != "infiltrator")
+                    hit_move = move
+                    if m_id in ("tripleaxel","triplekick"):
+                        hit_move = move.clone()
+                        hit_move.base_power = (20 if m_id == "tripleaxel" else 10)*hit
+                    atk_side = s.p1 if player == "p1" else s.p2
+                    critical = False
+                    if sample_outcomes and move.base_power > 0:
+                        ratio = move.crit_ratio + int(clean_key(attacker.ability) == "superluck")
+                        ratio += int(clean_key(attacker.item) in ("scopelens", "razorclaw"))
+                        denominator = (24, 8, 2, 1)[max(0, min(3, ratio - 1))]
+                        critical = move.will_crit or rng.randrange(denominator) == 0
+                        if clean_key(defender.ability) in ("battlearmor", "shellarmor"):
+                            critical = False
+                    rolls = calculate_damage_rolls(
+                        attacker, defender, hit_move, battle_weather, s.terrain,
+                        attacker_side=atk_side, is_critical=critical,
+                        defender_side=s.p2 if player == "p1" else s.p1,
+                    )
+                    median_dmg = rng.choice(rolls) if sample_outcomes else rolls[len(rolls) // 2]
+                    # Sampled blocks returned above; moves that bypass Protect reach here.
+                    succ_rate = 0.0 if sample_outcomes else getattr(defender, "protect_success_rate", 0.0)
+                    is_contact = getattr(move, "is_contact", False) or is_contact_move(m_id, move.category)
 
-                if succ_rate > 0.0:
-                    # Defender takes damage proportional to protect failure rate
-                    actual_dmg = int(median_dmg * (1.0 - succ_rate))
-                    actual_dmg = defender.take_damage(actual_dmg)
-                    # Spiky shield chip on physical/special contact when protected
-                    if succ_rate > 0.5 and getattr(defender, "last_protect_move", "") == "spikyshield" and is_contact:
-                        attacker.take_damage(max(1, attacker.max_hp // 8))
-                else:
-                    if hits_substitute:
-                        sub = defender.volatiles["substitute"]
-                        # Public logs hide exact remaining substitute HP. The local
-                        # search hypothesis starts with one quarter, marked unknown.
-                        sub_hp = sub.get("hp", -1)
-                        if sub_hp < 0: sub_hp = max(1,defender.max_hp // 4)
-                        actual_dmg = min(sub_hp, median_dmg)
-                        sub["hp"] = sub_hp - actual_dmg
-                        if sub["hp"] <= 0: defender.volatiles.pop("substitute")
+                    if succ_rate > 0.0:
+                        # Defender takes damage proportional to protect failure rate
+                        actual_dmg = int(median_dmg * (1.0 - succ_rate))
+                        actual_dmg = defender.take_damage(actual_dmg)
+                        # Spiky shield chip on physical/special contact when protected
+                        if succ_rate > 0.5 and getattr(defender, "last_protect_move", "") == "spikyshield" and is_contact:
+                            attacker.take_damage(max(1, attacker.max_hp // 8))
                     else:
-                        actual_dmg = defender.take_damage(median_dmg)
-                    # Rocky Helmet chip on contact when attack connects
-                    def_it = clean_key(defender.item)
-                    if not hits_substitute and actual_dmg > 0 and def_it == "rockyhelmet" and is_contact and clean_key(attacker.ability) != "magicguard":
-                        attacker.take_damage(max(1, attacker.max_hp // 6))
+                        if hits_substitute:
+                            sub = defender.volatiles["substitute"]
+                            # Public logs hide exact remaining substitute HP. The local
+                            # search hypothesis starts with one quarter, marked unknown.
+                            sub_hp = sub.get("hp", -1)
+                            if sub_hp < 0: sub_hp = max(1,defender.max_hp // 4)
+                            actual_dmg = min(sub_hp, median_dmg)
+                            sub["hp"] = sub_hp - actual_dmg
+                            if sub["hp"] <= 0: defender.volatiles.pop("substitute")
+                        else:
+                            actual_dmg = defender.take_damage(median_dmg)
+                        # Rocky Helmet chip on contact when attack connects
+                        def_it = clean_key(defender.item)
+                        if not hits_substitute and actual_dmg > 0 and def_it == "rockyhelmet" and is_contact and clean_key(attacker.ability) != "magicguard":
+                            attacker.take_damage(max(1, attacker.max_hp // 6))
 
-                if not hits_substitute and actual_dmg and defender.status == StatusCondition.FREEZE and move.move_type == PokemonType.FIRE:
-                    defender.status = StatusCondition.NONE
-                if m_id == "struggle":
-                    attacker.take_damage(max(1, (attacker.max_hp + 2) // 4))
+                    if not hits_substitute and actual_dmg and defender.status == StatusCondition.FREEZE and move.move_type == PokemonType.FIRE:
+                        defender.status = StatusCondition.NONE
+                    if m_id == "struggle":
+                        attacker.take_damage(max(1, (attacker.max_hp + 2) // 4))
 
-                # Pop Air Balloon on direct damage
-                if actual_dmg > 0 and clean_key(defender.item) == "airballoon":
-                    defender.item = None
-
-                # Knock Off item removal (if attack lands and defender not protected)
-                if not hits_substitute and actual_dmg > 0 and m_id == "knockoff" and succ_rate <= 0.5 and defender.item:
-                    if is_removable_item(defender.item):
+                    # Pop Air Balloon on direct damage
+                    if actual_dmg > 0 and clean_key(defender.item) == "airballoon":
                         defender.item = None
 
-                # Drain moves: heal attacker by exact canonical ratio or default 50%
-                if actual_dmg > 0 and getattr(move, "drain", None):
-                    num, den = move.drain
-                    drain_heal = max(1, (actual_dmg * num + den - 1) // den)
-                    attacker.heal(drain_heal)
-                elif actual_dmg > 0 and m_id in ("hornleech", "drainpunch", "gigadrain", "absorb", "megadrain", "drainingkiss", "oblivionwing", "bitterblade", "paraboliccharge"):
-                    drain_heal = max(1, actual_dmg // 2)
-                    attacker.heal(drain_heal)
+                    # Knock Off item removal (if attack lands and defender not protected)
+                    if not hits_substitute and actual_dmg > 0 and m_id == "knockoff" and succ_rate <= 0.5 and defender.item:
+                        if is_removable_item(defender.item):
+                            defender.item = None
 
-                # Recoil moves: recoil by exact canonical ratio or standard fraction
-                if actual_dmg > 0 and clean_key(attacker.ability) not in ("rockhead","magicguard") and getattr(move, "recoil", None):
-                    num, den = move.recoil
-                    attacker.take_damage(max(1, actual_dmg * num // den))
-                elif actual_dmg > 0 and clean_key(attacker.ability) not in ("rockhead","magicguard") and m_id in ("bravebird", "flareblitz", "woodhammer", "wavecrash", "doubleedge"):
-                    attacker.take_damage(max(1, actual_dmg // 3))
-                elif actual_dmg > 0 and clean_key(attacker.ability) not in ("rockhead","magicguard") and m_id in ("headsmash",):
-                    attacker.take_damage(max(1, actual_dmg // 2))
+                    # Drain moves: heal attacker by exact canonical ratio or default 50%
+                    if actual_dmg > 0 and getattr(move, "drain", None):
+                        num, den = move.drain
+                        drain_heal = max(1, (actual_dmg * num + den - 1) // den)
+                        attacker.heal(drain_heal)
+                    elif actual_dmg > 0 and m_id in ("hornleech", "drainpunch", "gigadrain", "absorb", "megadrain", "drainingkiss", "oblivionwing", "bitterblade", "paraboliccharge"):
+                        drain_heal = max(1, actual_dmg // 2)
+                        attacker.heal(drain_heal)
+
+                    # Recoil moves: recoil by exact canonical ratio or standard fraction
+                    if actual_dmg > 0 and clean_key(attacker.ability) not in ("rockhead","magicguard") and getattr(move, "recoil", None):
+                        num, den = move.recoil
+                        attacker.take_damage(max(1, actual_dmg * num // den))
+                    elif actual_dmg > 0 and clean_key(attacker.ability) not in ("rockhead","magicguard") and m_id in ("bravebird", "flareblitz", "woodhammer", "wavecrash", "doubleedge"):
+                        attacker.take_damage(max(1, actual_dmg // 3))
+                    elif actual_dmg > 0 and clean_key(attacker.ability) not in ("rockhead","magicguard") and m_id in ("headsmash",):
+                        attacker.take_damage(max(1, actual_dmg // 2))
+
+                    def_ab = clean_key(defender.ability)
+                    # Secondary effects occur on each connected strike.
+                    if actual_dmg > 0 and clean_key(attacker.ability) != "sheerforce":
+                        for sec in move.secondaries:
+                            chance = min(100,sec.get("chance",100)*(2 if clean_key(attacker.ability)=="serenegrace" else 1))
+                            triggered = (rng.random()*100 < chance) if sample_outcomes and chance < 100 else chance >= 100
+                            if not triggered:
+                                continue
+                            for key,delta in sec.get("self",{}).get("boosts",{}).items():
+                                if not attacker.is_fainted:
+                                    attacker.boosts[key] = max(-6,min(6,attacker.boosts.get(key,0)+delta))
+                            if hits_substitute or defender.is_fainted or def_ab == "shielddust" or clean_key(defender.item)=="covertcloak":
+                                continue
+                            for key,delta in sec.get("boosts",{}).items():
+                                defender.boosts[key] = max(-6,min(6,defender.boosts.get(key,0)+delta))
+                            if sec.get("volatileStatus") == "flinch" and def_ab != "innerfocus":
+                                other = "p2" if player=="p1" else "p1"
+                                if other not in moved_players:
+                                    flinched.add(other)
+                            if sec.get("volatileStatus") == "confusion" and def_ab != "owntempo" and not (defender.is_grounded() and s.terrain == Terrain.MISTY):
+                                defender.volatiles.setdefault("confusion", {"time":rng.randint(2,5) if sample_outcomes else 3})
+                            if defender.status == StatusCondition.NONE:
+                                kind = sec.get("status")
+                                immune = ((kind=="brn" and (PokemonType.FIRE in defender.active_types or def_ab in ("waterveil","waterbubble"))) or
+                                          (kind in ("psn","tox") and (PokemonType.POISON in defender.active_types or PokemonType.STEEL in defender.active_types or def_ab=="immunity")) or
+                                          (kind=="par" and (PokemonType.ELECTRIC in defender.active_types or def_ab=="limber")) or
+                                          (kind=="frz" and (PokemonType.ICE in defender.active_types or def_ab=="magmaarmor" or s.weather in (Weather.SUN,Weather.HARSH_SUN))) or
+                                          (defender.is_grounded() and s.terrain==Terrain.MISTY))
+                                if kind and not immune:
+                                    statuses={"brn":StatusCondition.BURN,"par":StatusCondition.PARALYSIS,"psn":StatusCondition.POISON,"tox":StatusCondition.TOXIC,"frz":StatusCondition.FREEZE}
+                                    if kind in statuses:
+                                        defender.status=statuses[kind]
+
+                    total_damage += actual_dmg
+                    if actual_dmg == 0:break
+                actual_dmg = total_damage
 
                 # Life Orb recoil (10% max HP)
                 if actual_dmg > 0 and clean_key(attacker.item) == "lifeorb" and clean_key(attacker.ability) != "magicguard" and not (clean_key(attacker.ability)=="sheerforce" and move.secondaries):
@@ -493,39 +550,6 @@ def simulate_turn_transition(
                     for stat_k, boost_val in move.boosts.items():
                         curr_b = defender.boosts.get(stat_k, 0)
                         defender.boosts[stat_k] = max(-6, min(6, curr_b + boost_val))
-
-            # Data-driven secondary effects. Expected search only applies guaranteed
-            # effects; sampled transitions draw lower probabilities explicitly.
-            if actual_dmg > 0 and clean_key(attacker.ability) != "sheerforce":
-                for sec in move.secondaries:
-                    chance = min(100,sec.get("chance",100)*(2 if clean_key(attacker.ability)=="serenegrace" else 1))
-                    triggered = (rng.random()*100 < chance) if sample_outcomes and chance < 100 else chance >= 100
-                    if not triggered:
-                        continue
-                    for key,delta in sec.get("self",{}).get("boosts",{}).items():
-                        if not attacker.is_fainted:
-                            attacker.boosts[key] = max(-6,min(6,attacker.boosts.get(key,0)+delta))
-                    if hits_substitute or defender.is_fainted or def_ab == "shielddust" or clean_key(defender.item)=="covertcloak":
-                        continue
-                    for key,delta in sec.get("boosts",{}).items():
-                        defender.boosts[key] = max(-6,min(6,defender.boosts.get(key,0)+delta))
-                    if sec.get("volatileStatus") == "flinch" and def_ab != "innerfocus":
-                        other = "p2" if player=="p1" else "p1"
-                        if other not in moved_players:
-                            flinched.add(other)
-                    if sec.get("volatileStatus") == "confusion" and def_ab != "owntempo" and not (defender.is_grounded() and s.terrain == Terrain.MISTY):
-                        defender.volatiles.setdefault("confusion", {"time":rng.randint(2,5) if sample_outcomes else 3})
-                    if defender.status == StatusCondition.NONE:
-                        kind = sec.get("status")
-                        immune = ((kind=="brn" and (PokemonType.FIRE in defender.active_types or def_ab in ("waterveil","waterbubble"))) or
-                                  (kind in ("psn","tox") and (PokemonType.POISON in defender.active_types or PokemonType.STEEL in defender.active_types or def_ab=="immunity")) or
-                                  (kind=="par" and (PokemonType.ELECTRIC in defender.active_types or def_ab=="limber")) or
-                                  (kind=="frz" and (PokemonType.ICE in defender.active_types or def_ab=="magmaarmor" or s.weather in (Weather.SUN,Weather.HARSH_SUN))) or
-                                  (defender.is_grounded() and s.terrain==Terrain.MISTY))
-                        if kind and not immune:
-                            statuses={"brn":StatusCondition.BURN,"par":StatusCondition.PARALYSIS,"psn":StatusCondition.POISON,"tox":StatusCondition.TOXIC,"frz":StatusCondition.FREEZE}
-                            if kind in statuses:
-                                defender.status=statuses[kind]
 
             if m_id == "substitute" and "substitute" not in attacker.volatiles and attacker.current_hp > attacker.max_hp / 4 and attacker.max_hp > 1:
                 cost = attacker.max_hp // 4
@@ -561,6 +585,9 @@ def simulate_turn_transition(
                                 source = (source_side,(s.p1 if source_side == 1 else s.p2).active_index)
                             target.volatiles.setdefault("trapped", {"source":source})
 
+            if m_id in WEATHER_MOVES:set_weather(s,WEATHER_MOVES[m_id],attacker)
+            if m_id in TERRAIN_MOVES:set_terrain(s,TERRAIN_MOVES[m_id],attacker)
+
             # Side/field effects are public and have finite cartridge durations.
             user_side = s.p1 if player == "p1" else s.p2
             if m_id in ("reflect","lightscreen","auroraveil"):
@@ -591,6 +618,7 @@ def simulate_turn_transition(
                 s.p1.tailwind, s.p2.tailwind = s.p2.tailwind, s.p1.tailwind
             elif m_id == "icespinner" and actual_dmg > 0:
                 s.terrain = Terrain.NONE
+                s.terrain_turns = 0
             elif m_id == "ceaselessedge" and actual_dmg > 0:
                 opp_side = s.p2 if player == "p1" else s.p1
                 opp_side.hazards[Hazard.SPIKES_1] = min(3, opp_side.hazards.get(Hazard.SPIKES_1, 0) + 1)
@@ -640,26 +668,32 @@ def simulate_turn_transition(
                             p1_active = s.p1.active_pokemon
             elif (getattr(move, "is_heal", False) and move.category == MoveCategory.STATUS and m_id != "rest") or m_id in ("recover", "roost", "slackoff", "softboiled", "wish", "synthesis", "moonlight", "morningsun", "shoreup", "milkdrink", "healorder"):
                 if attacker.current_hp < attacker.max_hp:
-                    attacker.heal(attacker.max_hp // 2)
+                    divisor = 2
+                    if m_id in ("synthesis","moonlight","morningsun"):
+                        if battle_weather in (Weather.SUN,Weather.HARSH_SUN):
+                            attacker.heal((attacker.max_hp*2+1)//3)
+                            divisor = 0
+                        elif battle_weather != Weather.NONE:divisor = 4
+                    if divisor:attacker.heal(attacker.max_hp // divisor)
             elif m_id == "rest":
-                if attacker.current_hp < attacker.max_hp and attacker.status != StatusCondition.SLEEP:
+                if attacker.current_hp < attacker.max_hp and attacker.status != StatusCondition.SLEEP and not (attacker.is_grounded() and s.terrain in (Terrain.ELECTRIC,Terrain.MISTY)):
                     attacker.heal(attacker.max_hp)
                     attacker.status = StatusCondition.SLEEP
                     attacker.status_turns = 3
             elif m_id == "willowisp":
                 target_mon = attacker if is_magic_bounce else defender
                 t_ab = clean_key(target_mon.ability)
-                if PokemonType.FIRE not in target_mon.active_types and t_ab != "goodasgold":
+                if PokemonType.FIRE not in target_mon.active_types and t_ab != "goodasgold" and target_mon.status == StatusCondition.NONE and not (target_mon.is_grounded() and s.terrain == Terrain.MISTY):
                     target_mon.status = StatusCondition.BURN
             elif m_id == "toxic":
                 target_mon = attacker if is_magic_bounce else defender
                 t_ab = clean_key(target_mon.ability)
-                if PokemonType.POISON not in target_mon.active_types and PokemonType.STEEL not in target_mon.active_types and t_ab != "goodasgold":
+                if PokemonType.POISON not in target_mon.active_types and PokemonType.STEEL not in target_mon.active_types and t_ab != "goodasgold" and target_mon.status == StatusCondition.NONE and not (target_mon.is_grounded() and s.terrain == Terrain.MISTY):
                     target_mon.status = StatusCondition.TOXIC
             elif m_id == "thunderwave":
                 target_mon = attacker if is_magic_bounce else defender
                 t_ab = clean_key(target_mon.ability)
-                if PokemonType.ELECTRIC not in target_mon.active_types and PokemonType.GROUND not in target_mon.active_types and t_ab != "goodasgold":
+                if PokemonType.ELECTRIC not in target_mon.active_types and PokemonType.GROUND not in target_mon.active_types and t_ab != "goodasgold" and target_mon.status == StatusCondition.NONE and not (target_mon.is_grounded() and s.terrain == Terrain.MISTY):
                     target_mon.status = StatusCondition.PARALYSIS
 
             moved_players.add(player)
@@ -677,6 +711,8 @@ def simulate_turn_transition(
     if s.is_game_over:
         return s  # Showdown ends immediately; no residual damage/healing or duration tick.
 
+    weather_residual(s)
+
     # Phase 4: End-of-turn effects (Leftovers, Black Sludge, Poison Heal, Status Orbs, Burn, Poison)
     for act_mon in (s.p1.active_pokemon, s.p2.active_pokemon):
         if act_mon and not act_mon.is_fainted:
@@ -686,6 +722,9 @@ def simulate_turn_transition(
             # Leftovers
             if it == "leftovers":
                 act_mon.heal(max(1, act_mon.max_hp // 16))
+
+            if s.terrain==Terrain.GRASSY and act_mon.is_grounded():
+                act_mon.heal(max(1,act_mon.max_hp//16))
 
             # Black Sludge
             if it == "blacksludge":
@@ -735,6 +774,9 @@ def simulate_turn_transition(
         side.tailwind = max(0,side.tailwind-1)
         side.screens = {name:(turns-1 if turns>0 else turns) for name,turns in side.screens.items() if turns != 1}
     s.trick_room = max(0,s.trick_room-1)
+    if s.terrain_turns > 0:
+        s.terrain_turns -= 1
+        if s.terrain_turns == 0:s.terrain = Terrain.NONE
     s.pending_switches = tuple(i for i,side in ((1,s.p1),(2,s.p2))
         if side.active_pokemon and side.active_pokemon.is_fainted and not side.is_all_fainted)
     if not s.pending_switches and not s.is_game_over:
@@ -903,7 +945,7 @@ class SubgameResolver:
                 if a1.action_type == ActionType.MOVE and a2.action_type == ActionType.MOVE and p1_mon_before and p2_mon_before:
                     m1_obj = next((x for x in p1_mon_before.moves if getattr(x, "id", "") == a1.move_id), None)
                     m2_obj = next((x for x in p2_mon_before.moves if getattr(x, "id", "") == a2.move_id), None)
-                    if m1_obj and m2_obj and m1_obj.priority == m2_obj.priority and spe1_before == spe2_before:
+                    if m1_obj and m2_obj and move_priority(p1_mon_before,m1_obj) == move_priority(p2_mon_before,m2_obj) and spe1_before == spe2_before:
                         is_speed_tie = True
 
                 if is_speed_tie:

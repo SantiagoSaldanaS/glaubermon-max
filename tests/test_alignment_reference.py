@@ -6,7 +6,7 @@ import pytest
 from glaubermon.core.battle_state import BattleState,BattleSide
 from glaubermon.core.pokemon import Pokemon,Move
 from glaubermon.core.actions import MoveAction,SwitchAction
-from glaubermon.core.types import PokemonType,StatusCondition,Hazard
+from glaubermon.core.types import PokemonType,StatusCondition,Hazard,Weather,Terrain
 from glaubermon.search.subgame_resolver import simulate_turn_transition
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -60,7 +60,7 @@ def from_snapshot(data):
     source=mon.volatiles.get(key,{}).get('source')
     if source:
      mon.volatiles[key]['source']=(source[0],next(i for i,p in enumerate(sides[source[0]-1].pokemon) if p.species==source[1]))
- return BattleState(*sides,trick_room=data['trick_room'],turn=data.get('turn',1),pending_switches=tuple(data.get('pending',[])))
+ return BattleState(*sides,weather={'sunnyday':Weather.SUN,'raindance':Weather.RAIN,'sandstorm':Weather.SANDSTORM,'snowscape':Weather.SNOW}.get(data.get('weather'),Weather.NONE),weather_turns=data.get('weather_turns',0),terrain={t.value+'terrain':t for t in Terrain}.get(data.get('terrain'),Terrain.NONE),terrain_turns=data.get('terrain_turns',0),trick_room=data['trick_room'],turn=data.get('turn',1),pending_switches=tuple(data.get('pending',[])))
 
 @pytest.fixture(scope='module')
 def reference():

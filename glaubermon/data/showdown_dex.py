@@ -241,6 +241,8 @@ class ShowdownDex:
             name=name,
             bypass_substitute=bool(flags.get("bypasssub")),
             volatile_status=entry.get("volatileStatus"),
+            multihit=entry.get("multihit"),
+            multiaccuracy=bool(entry.get("multiaccuracy",False)),
             move_type=m_type,
             category=m_cat,
             base_power=bp,

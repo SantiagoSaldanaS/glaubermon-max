@@ -106,6 +106,8 @@ def test_volatile_and_phase_trajectory(case,references):
     assert normalize_volatiles(ours,state)==m['volatiles']
   assert state.pending_switches==tuple(expected['pending'])
   assert state.turn==expected['turn']
+  field=from_snapshot(expected)
+  assert (state.weather,state.weather_turns,state.terrain,state.terrain_turns)==(field.weather,field.weather_turns,field.terrain,field.terrain_turns)
 
 
 def test_taunt_and_trapping_filter_search_actions(references):

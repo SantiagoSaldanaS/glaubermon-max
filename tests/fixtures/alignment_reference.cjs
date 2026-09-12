@@ -8,7 +8,7 @@ function mon(p) {return {species:p.species.name,level:p.level,types:p.getTypes()
  ...(v.time!==undefined?{time:v.time}:{}),...(v.boundDivisor?{divisor:v.boundDivisor}:{}),
  ...(['partiallytrapped','trapped'].includes(k)&&v.source?{source:[v.source.side.n+1,v.source.species.name]}:{})}];})),
  moves:p.moveSlots.map(m=>({id:m.id,pp:m.pp,maxpp:m.maxpp}))};}
-function snap(b) {return {turn:b.turn,pending:b.ended?[]:b.sides.filter(s=>s.activeRequest?.forceSwitch?.[0]).map(s=>s.n+1),sides:b.sides.map(s=>({active:s.pokemon.indexOf(s.active[0]),mons:s.pokemon.map(mon),
+function snap(b) {return {weather:b.field.weather,weather_turns:b.field.weatherState.duration||0,terrain:b.field.terrain,terrain_turns:b.field.terrainState.duration||0,turn:b.turn,pending:b.ended?[]:b.sides.filter(s=>s.activeRequest?.forceSwitch?.[0]).map(s=>s.n+1),sides:b.sides.map(s=>({active:s.pokemon.indexOf(s.active[0]),mons:s.pokemon.map(mon),
  hazards:Object.fromEntries(['stealthrock','spikes','toxicspikes','stickyweb'].filter(k=>s.sideConditions[k]).map(k=>[k,s.sideConditions[k].layers||1])),
  screens:Object.fromEntries(['reflect','lightscreen','auroraveil'].filter(k=>s.sideConditions[k]).map(k=>[k,s.sideConditions[k].duration])),
  tailwind:s.sideConditions.tailwind?.duration||0})),trick_room:b.field.pseudoWeather.trickroom?.duration||0};}
@@ -35,11 +35,22 @@ for (const fixture of input) {
   if(c.tailwind)b.sides[i].addSideCondition('tailwind',p);
   for(const k of c.screens||[])b.sides[i].addSideCondition(k,p);
  }
+ if(fixture.weather){b.field.setWeather(fixture.weather,b.sides[0].active[0]);if(fixture.weather_turns!==undefined)b.field.weatherState.duration=fixture.weather_turns;}
+ if(fixture.terrain){b.field.setTerrain(fixture.terrain,b.sides[0].active[0]);if(fixture.terrain_turns!==undefined)b.field.terrainState.duration=fixture.terrain_turns;}
  if(fixture.trick_room)b.field.addPseudoWeather('trickroom',b.sides[0].active[0]);
  if(fixture.initial?.some(c=>c.pp)) b.makeRequest("move");
+ const damageTrace=[];
+ for(const side of b.sides) for(const pokemon of side.pokemon){
+ const damage=pokemon.damage;
+ pokemon.damage=function(amount,source,effect){
+  const value=damage.call(this,amount,source,effect);
+  if(typeof value==='number' && value>0)damageTrace.push({side:this.side.n+1,damage:value,effect:effect?.id||effect,critical:!!(effect && typeof effect==='object' && effect.moveHitData?.[this.getSlot()]?.crit)});
+  return value;
+ };
+ }
  const before=snap(b), results=[];
  for(const choices of fixture.actions||[['move 1','move 1']]) { b.makeChoices(...choices);results.push(snap(b));if(b.ended)break; }
- output.push({name:fixture.name,before,results,log:b.log});
+ output.push({name:fixture.name,before,results,damageTrace,log:b.log});
  } finally {b.destroy();}
 }
 console.log(JSON.stringify(output));

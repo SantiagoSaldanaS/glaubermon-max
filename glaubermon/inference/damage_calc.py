@@ -5,6 +5,7 @@ from typing import List, Optional, Tuple, Any
 from glaubermon.core.types import PokemonType, MoveCategory, Weather, Terrain, StatusCondition
 from glaubermon.core.constants import get_type_effectiveness, clean_key
 from glaubermon.core.pokemon import Pokemon, Move
+from glaubermon.core.field_mechanics import effective_weather, poke_round
 
 
 SLICING_MOVES = {
@@ -94,6 +95,8 @@ def calculate_damage_rolls(
     """Calculate all 16 discrete damage rolls for a move in Gen 9."""
     m_id = move.id.lower().replace(" ", "").replace("-", "")
 
+    weather = effective_weather(weather,attacker,defender)
+
     # Fixed damage still respects type immunity.
     if m_id in ("nightshade","seismictoss","superfang"):
         t1,t2 = defender.active_types
@@ -122,6 +125,14 @@ def calculate_damage_rolls(
             move_type = PokemonType.FIRE
         elif attacker.species == "Ogerpon-Cornerstone" or (attacker.item and "cornerstone" in attacker.item.lower()):
             move_type = PokemonType.ROCK
+
+    if m_id == "weatherball":
+        move_type = {Weather.SUN:PokemonType.FIRE,Weather.RAIN:PokemonType.WATER,
+                     Weather.SANDSTORM:PokemonType.ROCK,Weather.SNOW:PokemonType.ICE,
+                     Weather.HARSH_SUN:PokemonType.FIRE,Weather.HEAVY_RAIN:PokemonType.WATER}.get(weather,move_type)
+    if m_id == "terrainpulse" and attacker.is_grounded():
+        move_type = {Terrain.ELECTRIC:PokemonType.ELECTRIC,Terrain.GRASSY:PokemonType.GRASS,
+                     Terrain.PSYCHIC:PokemonType.PSYCHIC,Terrain.MISTY:PokemonType.FAIRY}.get(terrain,move_type)
 
     def_ability = (defender.ability or "").lower().replace("-", "").replace(" ", "")
     atk_ability = (attacker.ability or "").lower().replace("-", "").replace(" ", "")
@@ -207,14 +218,28 @@ def calculate_damage_rolls(
         if (atk_ability == "beadsofruin" or def_ability == "beadsofruin") and def_ability != "beadsofruin":
             defense = int(defense * 0.75)
 
+    if move.category == MoveCategory.PHYSICAL and weather == Weather.SNOW and PokemonType.ICE in defender.active_types:
+        defense = poke_round(defense*6144)
+    if move.category == MoveCategory.SPECIAL and weather == Weather.SANDSTORM and PokemonType.ROCK in defender.active_types:
+        defense = poke_round(defense*6144)
+    if move.category == MoveCategory.SPECIAL and atk_ability == "solarpower" and weather in (Weather.SUN,Weather.HARSH_SUN):
+        atk = poke_round(atk*6144)
+
     crit_mult = 2.25 if (is_critical and atk_ability == "sniper") else (1.5 if is_critical else 1.0)
 
-    # Base power modifiers: Technician & Knock Off item boost
     effective_bp = move.base_power
-    if atk_ability == "technician" and 0 < effective_bp <= 60:
-        effective_bp = int(effective_bp * 1.5)
-    if m_id == "knockoff" and is_removable_item(defender.item):
-        effective_bp = int(effective_bp * 1.5)
+    if m_id == "weatherball" and weather not in (Weather.NONE,Weather.STRONG_WINDS):effective_bp *= 2
+    if m_id == "terrainpulse" and terrain != Terrain.NONE and attacker.is_grounded():effective_bp *= 2
+    bp_mods=[]
+    if atk_ability == "technician" and 0 < effective_bp <= 60:bp_mods.append(6144)
+    if m_id == "knockoff" and is_removable_item(defender.item):bp_mods.append(6144)
+    if attacker.is_grounded() and {Terrain.GRASSY:PokemonType.GRASS,Terrain.ELECTRIC:PokemonType.ELECTRIC,Terrain.PSYCHIC:PokemonType.PSYCHIC}.get(terrain)==move_type:
+        bp_mods.append(5325)
+    if defender.is_grounded() and ((terrain==Terrain.GRASSY and m_id in ("earthquake","bulldoze","magnitude")) or (terrain==Terrain.MISTY and move_type==PokemonType.DRAGON)):
+        bp_mods.append(2048)
+    modifier=4096
+    for mod in bp_mods:modifier=(modifier*mod+2048)//4096
+    effective_bp=max(1,poke_round(effective_bp*modifier))
 
     # 7. Base damage formula
     level_factor = int((2 * attacker.level) / 5) + 2
@@ -222,7 +247,7 @@ def calculate_damage_rolls(
 
     # 8. Weather modifier
     weather_mult = 1.0
-    if weather == Weather.SUN:
+    if weather in (Weather.SUN,Weather.HARSH_SUN):
         if move_type == PokemonType.FIRE:
             weather_mult = 1.5
         elif move_type == PokemonType.WATER:
@@ -231,7 +256,7 @@ def calculate_damage_rolls(
                 weather_mult = 1.5
             else:
                 weather_mult = 0.5
-    elif weather == Weather.RAIN:
+    elif weather in (Weather.RAIN,Weather.HEAVY_RAIN):
         if move_type == PokemonType.WATER:
             weather_mult = 1.5
         elif move_type == PokemonType.FIRE:
