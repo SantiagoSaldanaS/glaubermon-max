@@ -1,7 +1,7 @@
 {
   "purpose": "Integration verification only, not a performance benchmark or retraining",
   "reference": "pokemon-showdown@0.11.11",
-  "total_completed_games": 12,
+  "total_completed_games": 16,
   "control_runs": [
     {
       "directory": "alignment-v4-smoke",
@@ -719,6 +719,139 @@
         "p95": 6.52855031248182,
         "maximum": 15.534144999983255
       }
+    },
+    {
+      "source": "96ad6dc0710e981f4e333e00f4d1a050d7851176",
+      "depth": 2,
+      "checkpoint_sha256": "2aa0deadf7d3ac650981e051544521ee8ccc0b9689f1457f921c0ed99957f0f6",
+      "directory": "alignment-fields-depth2",
+      "games": [
+        {
+          "id": 0,
+          "block": 0,
+          "mode": "hybrid",
+          "bot_side": 0,
+          "teams": [
+            "balance",
+            "stall"
+          ],
+          "seed": [
+            1,
+            911,
+            23456,
+            34567
+          ],
+          "decisions": 23,
+          "invalid_actions": [],
+          "fallbacks": 0,
+          "latencies": [
+            0.00017029198352247477,
+            1.5113980830064975,
+            1.527293124992866,
+            1.168028041953221,
+            1.6990478749503382,
+            1.463360624969937,
+            1.5077480420004576,
+            1.0870943749905564,
+            1.5123506670352072,
+            1.233140458993148,
+            1.2147768340073526,
+            1.5159913340467028,
+            2.509324541024398,
+            5.58906583301723,
+            5.0006490829982795,
+            2.6131665830034763,
+            1.4041578330215998,
+            16.309343709028326,
+            8.729784958006348,
+            7.0448050840059295,
+            7.217206832952797,
+            0.7453983750310726,
+            1.0181597089977004
+          ],
+          "status": "completed",
+          "winner": "Glaubermon",
+          "turns": 21,
+          "neural_forward_calls": 11341,
+          "seconds": 73.98218958295183
+        },
+        {
+          "id": 1,
+          "block": 0,
+          "mode": "hybrid",
+          "bot_side": 1,
+          "teams": [
+            "balance",
+            "stall"
+          ],
+          "seed": [
+            1,
+            911,
+            23456,
+            34567
+          ],
+          "decisions": 45,
+          "invalid_actions": [],
+          "fallbacks": 0,
+          "latencies": [
+            8.766597602516413e-05,
+            1.3222167500061914,
+            1.2865295420051552,
+            4.575415375002194,
+            1.5398909579962492,
+            1.0579579999903217,
+            1.2094610829954036,
+            1.1324211250175722,
+            1.1543576659751125,
+            1.0907903330517001,
+            1.1636107919621281,
+            1.2029381250031292,
+            1.1056124999886379,
+            1.114976916986052,
+            1.1108064169529825,
+            1.0566252500284463,
+            1.1231710409629159,
+            1.1894867080263793,
+            1.0673448750167154,
+            1.1053669590037316,
+            1.0698978750151582,
+            1.1609894579742104,
+            1.1898415830219164,
+            0.598243749991525,
+            1.2601775839575566,
+            1.2936726249754429,
+            1.2136506249662489,
+            1.3676804170245305,
+            1.3605547500192188,
+            1.3933871659683064,
+            1.7669232499902137,
+            1.3950277080293745,
+            1.7794486670172773,
+            1.1105594590189867,
+            3.009079874958843,
+            1.5548167080269195,
+            1.7207760410383344,
+            0.920318334014155,
+            1.123327374982182,
+            6.488685209013056,
+            3.0065608749864623,
+            5.133748917025514,
+            4.504358583013527,
+            1.184463625017088,
+            0.2685657499823719
+          ],
+          "status": "completed",
+          "winner": "Glaubermon",
+          "turns": 43,
+          "neural_forward_calls": 9000,
+          "seconds": 72.88897629198618
+        }
+      ],
+      "latency_seconds": {
+        "median": 1.273353562981356,
+        "p95": 6.850163127758423,
+        "max": 16.309343709028326
+      }
     }
   ],
   "development_run": {
@@ -802,7 +935,15 @@
     "alignment-v4-batched-depth2/hybrid-001.log": "533741c8f8daa3f992e19c97d44b6b7018ac2644a1d7c7ee633828226345871c",
     "alignment-v4-development/game-0.jsonl": "bccf6659077381a19c812de30b1e316e0de0b1d89471e9d2d7699614ad4f27b9",
     "alignment-v4-development/results.json": "9887d3435b551367ca787edb6a96c541869f68951f1c6887f0f48d221915f537",
-    "alignment-v4-development/game-1.jsonl": "4210df5ede0609bbf86a8ac22333e9af39d64ee6a6f64ed08d36209d210a2e7b"
+    "alignment-v4-development/game-1.jsonl": "4210df5ede0609bbf86a8ac22333e9af39d64ee6a6f64ed08d36209d210a2e7b",
+    "alignment-fields-depth2/hybrid-000.jsonl": "500ea23fc767fc3f57f005cfe9d29d94c36f7eda81536421c50bf1d880d352c9",
+    "alignment-fields-depth2/hybrid-000.json": "1d400d402e33cf52c4e7fe5a323e26952cab8b57f5283cb32071a3fc5b9ddfd4",
+    "alignment-fields-depth2/hybrid-001.json": "2b2ccf95d9a8def8d4efd1b55e19d48c26311cafde185ca3359a249603269783",
+    "alignment-fields-depth2/hybrid-001.jsonl": "c95cba97ad7445ddc485bb9da245b89791e39e0332355d728c76dac150b89573",
+    "alignment-fields-depth2/manifest.json": "536a178289d6b8c9e4a8aad538142e4183cc4ad78ec56eeca371ab444c88a129",
+    "alignment-fields-development/game-0.jsonl": "093c7c689f7eee6634e712ba44a0cae82b3187cc8d02274a57e057c8ca8a67f9",
+    "alignment-fields-development/results.json": "d7fc1305296955af157e5a95f00aba48b447ceb853b700b5b3f46a76f237ea61",
+    "alignment-fields-development/game-1.jsonl": "9fde43f78eacafd5fbae2bb74a08da9604a32f99632de8021b9f162facbdd1b6"
   },
   "training_allowed": false,
   "batching_comparison": {
@@ -811,5 +952,87 @@
     "forward_calls_after": 20341,
     "p95_seconds_before": 9.673719902339506,
     "p95_seconds_after": 6.52855031248182
-  }
+  },
+  "additional_development_runs": [
+    {
+      "purpose": "Integration only; frozen weights, discarded samples, no optimizer",
+      "source": "96ad6dc0710e981f4e333e00f4d1a050d7851176",
+      "checkpoint_sha256": "2aa0deadf7d3ac650981e051544521ee8ccc0b9689f1457f921c0ed99957f0f6",
+      "depth": 1,
+      "showdown_version": "0.11.11",
+      "games": [
+        {
+          "terminated": true,
+          "winner": "SelfPlay2",
+          "turns": 27,
+          "samples": 65,
+          "seed": [
+            1401,
+            2,
+            3,
+            4
+          ],
+          "teams": [
+            "development_offense",
+            "development_rain"
+          ]
+        },
+        {
+          "terminated": true,
+          "winner": "SelfPlay2",
+          "turns": 27,
+          "samples": 67,
+          "seed": [
+            1402,
+            2,
+            3,
+            4
+          ],
+          "teams": [
+            "development_rain",
+            "development_offense"
+          ]
+        }
+      ],
+      "unchanged_model_weights": true,
+      "directory": "alignment-fields-development",
+      "public_move_events": {
+        "Magma Storm": 8,
+        "Earth Power": 1,
+        "Draco Meteor": 2,
+        "rain_starts": 5,
+        "Surf": 4,
+        "Hurricane": 7,
+        "Ice Punch": 2,
+        "Extreme Speed": 4,
+        "Crunch": 7,
+        "Substitute": 3,
+        "Rapid Spin": 3,
+        "Stealth Rock": 2,
+        "Earthquake": 9,
+        "Knock Off": 3,
+        "Flip Turn": 3,
+        "U-turn": 1,
+        "Iron Head": 1,
+        "Aura Sphere": 1,
+        "Shadow Ball": 6,
+        "Liquidation": 3,
+        "Volt Switch": 2,
+        "Thunderclap": 2,
+        "Body Press": 2,
+        "Aqua Jet": 1,
+        "Sucker Punch": 1,
+        "Flower Trick": 2
+      },
+      "invalid_actions": [],
+      "default_choices": 0,
+      "python": "3.12.13",
+      "torch": "2.14.0",
+      "team_pool": {
+        "development_offense": "Dragonite||heavydutyboots|multiscale|dragondance,extremespeed,earthquake,icepunch|Adamant|,252,4,,,252|||||,,,,,Normal]Meowscarada||choicescarf|protean|flowertrick,knockoff,uturn,tripleaxel|Jolly|,252,4,,,252|||||,,,,,Grass]Zamazenta||leftovers|dauntlessshield|irondefense,bodypress,crunch,substitute|Jolly|252,,4,,,252|||||,,,,,Steel]Heatran||airballoon|flashfire|magmastorm,earthpower,taunt,stealthrock|Timid|,,,252,4,252|||||,,,,,Grass]Iron Valiant||lifeorb|quarkdrive|moonblast,aurasphere,shadowball,calmmind|Timid|,,,252,4,252|||||,,,,,Fairy]Great Tusk||leftovers|protosynthesis|earthquake,knockoff,rapidspin,bulkup|Jolly|252,,4,,,252|||||,,,,,Steel",
+        "development_rain": "Pelipper||damprock|drizzle|surf,hurricane,uturn,roost|Bold|248,,252,,8,|||||,,,,,Ground]Barraskewda||choiceband|swiftswim|liquidation,flipturn,closecombat,aquajet|Adamant|,252,4,,,252|||||,,,,,Water]Raging Bolt||boosterenergy|protosynthesis|thunderclap,dracometeor,thunderbolt,calmmind|Modest|64,,,252,,192|||||,,,,,Fairy]Iron Treads||leftovers|quarkdrive|earthquake,voltswitch,rapidspin,stealthrock|Jolly|252,,4,,,252|||||,,,,,Water]Gholdengo||leftovers|goodasgold|shadowball,makeitrain,recover,nastyplot|Modest|252,,,252,4,|||||,,,,,Water]Kingambit||lumberry|supremeoverlord|kowtowcleave,suckerpunch,ironhead,swordsdance|Adamant|252,252,,,,4|||||,,,,,Dark"
+      }
+    }
+  ],
+  "original_checkpoint_files_verified_unchanged": 8
 }
